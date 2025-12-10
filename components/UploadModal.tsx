@@ -9,7 +9,7 @@ interface UploadModalProps {
   isOpen: boolean;
   onClose: () => void;
   onSave: (fabric: Fabric) => Promise<void> | void;
-  onBulkSave?: (fabrics: Fabric[]) => Promise<void> | void;
+  onBulkSave?: (fabrics: Fabric[], onProgress?: (current: number, total: number) => void) => Promise<void> | void;
   onReset?: () => void;
 }
 
@@ -18,7 +18,11 @@ const UploadModal: React.FC<UploadModalProps> = ({ isOpen, onClose, onSave, onBu
   const [files, setFiles] = useState<File[]>([]);
   const [extractedFabrics, setExtractedFabrics] = useState<Partial<Fabric>[]>([]);
   const [currentProgress, setCurrentProgress] = useState<string>('');
+  
+  // Save Progress State
   const [isSaving, setIsSaving] = useState(false);
+  const [saveProgress, setSaveProgress] = useState({ current: 0, total: 0 });
+
   const [selectedCategory, setSelectedCategory] = useState<'model' | 'wood'>('model');
   const [expandedSpecsIndex, setExpandedSpecsIndex] = useState<number | null>(null);
   
@@ -105,12 +109,19 @@ const UploadModal: React.FC<UploadModalProps> = ({ isOpen, onClose, onSave, onBu
       try {
         if (pdfFile) {
             const base64Data = await fileToBase64(pdfFile);
-            rawData = await extractFabricData(base64Data.split(',')[1], 'application/pdf');
-            if (base64Data.length < 1000000) { 
-                rawData.pdfUrl = base64Data;
+            // Limit PDF size being sent to AI analysis to avoid payload error
+            // If it's a huge PDF, we might need to skip analysis or rely on filename
+            if (base64Data.length < 3000000) {
+                 rawData = await extractFabricData(base64Data.split(',')[1], 'application/pdf');
+            } else {
+                 console.warn("PDF too large for AI analysis, skipping extraction.");
             }
+            // Store full PDF (up to a limit) or relies on later storage upload
+            rawData.pdfUrl = base64Data;
+
         } else if (imgFiles.length > 0) {
-            const aiAnalysisImg = await compressImage(imgFiles[0], 1024, 0.85);
+            // LOW RES for AI Analysis (800px) - avoids 500 Error
+            const aiAnalysisImg = await compressImage(imgFiles[0], 800, 0.80);
             rawData = await extractFabricData(aiAnalysisImg.split(',')[1], 'image/jpeg');
         }
       } catch (e: any) {
@@ -153,9 +164,11 @@ const UploadModal: React.FC<UploadModalProps> = ({ isOpen, onClose, onSave, onBu
             // HIGH QUALITY STORAGE: 2560px, 0.95
             const base64Img = await compressImage(file, 2560, 0.95);
             
-            // For OCR, we can use the same string or a smaller one, but let's reuse to keep it simple
-            // We pass split base64 to AI
-            let detectedName = await extractColorFromSwatch(base64Img.split(',')[1]);
+            // LOW QUALITY FOR AI: 800px (Faster, no 500 errors)
+            const base64ImgSmall = await compressImage(file, 800, 0.80);
+
+            // Pass SMALL image to AI
+            let detectedName = await extractColorFromSwatch(base64ImgSmall.split(',')[1]);
             
             if (!detectedName) {
                 const fileNameLower = file.name.toLowerCase().replace(/\.[^/.]+$/, "");
@@ -182,7 +195,7 @@ const UploadModal: React.FC<UploadModalProps> = ({ isOpen, onClose, onSave, onBu
 
             if (detectedName) {
                 if (!colorImages[detectedName]) {
-                    colorImages[detectedName] = base64Img;
+                    colorImages[detectedName] = base64Img; // Store High Quality
                     detectedColorsList.push(detectedName);
                 }
             }
@@ -294,6 +307,8 @@ const UploadModal: React.FC<UploadModalProps> = ({ isOpen, onClose, onSave, onBu
   const handleFinalSave = async () => {
     if (extractedFabrics.length === 0) return;
     setIsSaving(true);
+    setSaveProgress({ current: 0, total: extractedFabrics.length });
+
     try {
         const finalFabrics: Fabric[] = extractedFabrics.map(data => ({
             id: Date.now().toString() + Math.random().toString(36).substr(2, 9),
@@ -312,7 +327,9 @@ const UploadModal: React.FC<UploadModalProps> = ({ isOpen, onClose, onSave, onBu
         if (finalFabrics.length === 1) {
             await onSave(finalFabrics[0]);
         } else if (finalFabrics.length > 1 && onBulkSave) {
-            await onBulkSave(finalFabrics);
+            await onBulkSave(finalFabrics, (current, total) => {
+                setSaveProgress({ current, total });
+            });
         }
         
         // Only close if successful
@@ -369,12 +386,24 @@ const UploadModal: React.FC<UploadModalProps> = ({ isOpen, onClose, onSave, onBu
         )}
 
         {isSaving ? (
-             <div className="flex flex-col items-center justify-center flex-1 h-64 space-y-6 text-center">
+             <div className="flex flex-col items-center justify-center flex-1 h-64 space-y-6 text-center w-full max-w-md mx-auto">
                 <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-black"></div>
-                <div>
+                <div className="w-full">
                     <p className="font-serif text-lg font-bold">Guardando en la Nube...</p>
-                    <p className="text-xs text-gray-400 mt-2">Subiendo imágenes de ALTA CALIDAD a Firebase Storage.</p>
-                    <p className="text-xs text-gray-300 mt-1">Si tarda mucho, revisa tu conexión a internet.</p>
+                    {saveProgress.total > 1 && (
+                         <div className="mt-4 w-full bg-gray-200 rounded-full h-2.5">
+                             <div 
+                                className="bg-black h-2.5 rounded-full transition-all duration-300" 
+                                style={{ width: `${(saveProgress.current / saveProgress.total) * 100}%` }}
+                             ></div>
+                         </div>
+                    )}
+                    <p className="text-sm font-bold mt-2 text-black">
+                        {saveProgress.total > 1 
+                            ? `Subiendo ${saveProgress.current} de ${saveProgress.total} fichas` 
+                            : 'Finalizando subida...'}
+                    </p>
+                    <p className="text-xs text-gray-400 mt-1">Estamos subiendo las imágenes en alta calidad.</p>
                 </div>
              </div>
         ) : (

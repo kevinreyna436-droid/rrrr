@@ -151,14 +151,14 @@ export default function App() {
     }
   };
 
-  const handleBulkSaveFabrics = async (newFabrics: Fabric[]) => {
+  const handleBulkSaveFabrics = async (newFabrics: Fabric[], onProgress?: (c: number, t: number) => void) => {
     try {
       setFabrics(prev => {
           const currentNames = new Set(prev.map(f => f.name.toLowerCase()));
           const uniqueNew = newFabrics.filter(f => !currentNames.has(f.name.toLowerCase()));
           return [...uniqueNew, ...prev];
       });
-      await saveBatchFabricsToFirestore(newFabrics);
+      await saveBatchFabricsToFirestore(newFabrics, onProgress);
       setOfflineStatus(isOfflineMode()); // Update status after save attempt
     } catch (e: any) {
       console.error("Error bulk saving:", e?.message || "Unknown error");

@@ -154,12 +154,14 @@ const processFabricImagesForStorage = async (fabric: Fabric): Promise<Fabric> =>
         try {
             return await uploadImageToStorage(data, path);
         } catch (e: any) {
-            console.error("Image upload failed, falling back to base64.", e);
-            // If upload fails due to configuration, we want to STOP saving to avoid breaking the DB with base64
+            console.error("Image upload failed.", e);
+            // If upload fails due to configuration, we throw to stop the process
             if (e.message.includes("CORS") || e.message.includes("Permission") || e.message.includes("Bucket")) {
-                throw e; // Rethrow critical config errors
+                throw e; 
             }
-            return data; 
+            // For network errors, we return the original base64 temporarily, 
+            // BUT the batch saver will strip it to avoid "Payload too large".
+            throw new Error("UploadFailed"); 
         }
     };
 
@@ -173,6 +175,17 @@ const processFabricImagesForStorage = async (fabric: Fabric): Promise<Fabric> =>
             const path = `fabrics/${updatedFabric.id}/specs_${timestamp}.jpg`;
             updatedFabric.specsImage = await safeUpload(updatedFabric.specsImage, path);
         }
+        
+        // Handle PDF if it's base64 (Storage it!)
+        if (updatedFabric.pdfUrl && updatedFabric.pdfUrl.startsWith('data:')) {
+             const path = `fabrics/${updatedFabric.id}/specs_${timestamp}.pdf`;
+             // Reuse safeUpload logic but for PDF
+             if (!globalOfflineMode) {
+                 const storageRef = ref(storage, path);
+                 await uploadString(storageRef, updatedFabric.pdfUrl, 'data_url', { contentType: 'application/pdf' });
+                 updatedFabric.pdfUrl = await getDownloadURL(storageRef);
+             }
+        }
 
         if (updatedFabric.colorImages) {
             const newColorImages: Record<string, string> = {};
@@ -180,16 +193,24 @@ const processFabricImagesForStorage = async (fabric: Fabric): Promise<Fabric> =>
                 if (base64 && base64.startsWith('data:')) {
                     const safeColorName = colorName.replace(/[^a-z0-9]/gi, '_').toLowerCase();
                     const path = `fabrics/${updatedFabric.id}/colors/${safeColorName}_${timestamp}.jpg`;
-                    newColorImages[colorName] = await safeUpload(base64, path);
+                    try {
+                        newColorImages[colorName] = await safeUpload(base64, path);
+                    } catch (e) {
+                         // If one color fails, we skip it or keep base64? 
+                         // To avoid crashing the whole batch, we skip the image for this color.
+                         console.warn(`Skipping color image ${colorName} due to upload error`);
+                         newColorImages[colorName] = ''; 
+                    }
                 } else {
                     newColorImages[colorName] = base64;
                 }
             }
             updatedFabric.colorImages = newColorImages;
         }
-    } catch (e) {
+    } catch (e: any) {
+        if (e.message === "UploadFailed") throw e; // Pass up for handling
         console.warn("Image upload process interrupted.", e);
-        throw e; // Propagate error to warn user
+        throw e;
     }
 
     return updatedFabric;
@@ -298,23 +319,34 @@ export const saveFabricToFirestore = async (fabric: Fabric) => {
   }
 
   try {
-    // 1. Try to upload images
     console.log("Iniciando proceso de subida de imágenes...");
     fabricToSave = await processFabricImagesForStorage(fabric);
   } catch (error: any) {
     console.error("Error en subida de imágenes:", error);
-    // If it's a critical config error, we alert and STOP. We do not want to save broken data locally if the intention was cloud.
     if (error.message.includes("CORS") || error.message.includes("Permission") || error.message.includes("Bucket")) {
         alert(`NO SE PUEDEN SUBIR FOTOS: ${error.message}`);
-        throw error; // Stop process
+        throw error; 
     }
+    // For single saves, we might warn but still allow saving text? 
+    // Let's prompt user or just fail safe.
+    if (!window.confirm("Falló la subida de algunas imágenes. ¿Guardar solo los datos de texto?")) {
+        throw error;
+    }
+    // Clean images to allow text save
+    fabricToSave.mainImage = fabricToSave.mainImage.startsWith('http') ? fabricToSave.mainImage : '';
+    fabricToSave.specsImage = fabricToSave.specsImage?.startsWith('http') ? fabricToSave.specsImage : '';
+    // Clear heavy base64 colors
+    const cleanColors: Record<string, string> = {};
+    for (const [k, v] of Object.entries(fabricToSave.colorImages || {})) {
+        if (v.startsWith('http')) cleanColors[k] = v;
+    }
+    fabricToSave.colorImages = cleanColors;
   }
 
   try {
     const cleanFabric = createCleanFabricObject(fabricToSave);
     if (!cleanFabric.id) throw new Error("Invalid ID");
     
-    // 2. Try to save document
     const savePromise = setDoc(doc(db, COLLECTION_NAME, cleanFabric.id), cleanFabric, { merge: true });
     const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('TIMEOUT_SAVE')), 20000));
     
@@ -323,9 +355,8 @@ export const saveFabricToFirestore = async (fabric: Fabric) => {
     
   } catch (error: any) {
     console.warn("Error guardando en Firestore:", error);
-    
     if (error.message && error.message.includes("exceeds the maximum allowed size")) {
-        alert("ERROR: La imagen es demasiado pesada y no se subió a la nube (probablemente falló la subida previa). La base de datos rechazó guardar el archivo gigante.");
+        alert("ERROR CRÍTICO: Payload demasiado grande. Se intentó guardar imágenes base64.");
     } else {
         saveLocalFabric(fabricToSave); 
     }
@@ -333,17 +364,64 @@ export const saveFabricToFirestore = async (fabric: Fabric) => {
   }
 };
 
-export const saveBatchFabricsToFirestore = async (fabrics: Fabric[]) => {
+export const saveBatchFabricsToFirestore = async (
+    fabrics: Fabric[], 
+    onProgress?: (current: number, total: number) => void
+) => {
   if (globalOfflineMode) {
       fabrics.forEach(f => saveLocalFabric(f));
+      if (onProgress) onProgress(fabrics.length, fabrics.length);
       return;
   }
   
-  const BATCH_SIZE = 400;
+  // STEP 1: Process Images for ALL fabrics
+  const processedFabrics: Fabric[] = [];
+  
+  console.log(`Iniciando carga masiva de ${fabrics.length} elementos...`);
+  
+  for (let i = 0; i < fabrics.length; i++) {
+      if (onProgress) onProgress(i, fabrics.length); 
+      
+      const fabric = fabrics[i];
+      try {
+          const processed = await processFabricImagesForStorage(fabric);
+          processedFabrics.push(processed);
+          console.log(`Imágenes procesadas para ${i+1}/${fabrics.length}: ${fabric.name}`);
+      } catch (e: any) {
+          console.error(`Fallo procesando imágenes para ${fabric.name}`, e);
+          
+          // CRITICAL FIX: If storage upload fails, DO NOT push the original fabric with Base64.
+          // This causes the "Payload size exceeds limit" error in Firestore.
+          // Instead, strip the images and save only text + technical data.
+          const strippedFabric = { ...fabric };
+          
+          // Keep existing URLs if any, but remove Base64
+          strippedFabric.mainImage = strippedFabric.mainImage?.startsWith('http') ? strippedFabric.mainImage : '';
+          strippedFabric.specsImage = strippedFabric.specsImage?.startsWith('http') ? strippedFabric.specsImage : '';
+          strippedFabric.pdfUrl = strippedFabric.pdfUrl?.startsWith('http') ? strippedFabric.pdfUrl : '';
+
+          const cleanColors: Record<string, string> = {};
+          if (strippedFabric.colorImages) {
+              for (const [k, v] of Object.entries(strippedFabric.colorImages)) {
+                  if (v && v.startsWith('http')) cleanColors[k] = v;
+              }
+          }
+          strippedFabric.colorImages = cleanColors;
+          
+          // Append error note
+          strippedFabric.technicalSummary = (strippedFabric.technicalSummary || '') + " [NOTA SISTEMA: Error subiendo imágenes a la nube]";
+          
+          processedFabrics.push(strippedFabric);
+      }
+  }
+
+  // STEP 2: Batch Save to Firestore
+  // Reduced Batch Size to avoid 10MB limit
+  const BATCH_SIZE = 50; 
   const chunks = [];
   
-  for (let i = 0; i < fabrics.length; i += BATCH_SIZE) {
-      chunks.push(fabrics.slice(i, i + BATCH_SIZE));
+  for (let i = 0; i < processedFabrics.length; i += BATCH_SIZE) {
+      chunks.push(processedFabrics.slice(i, i + BATCH_SIZE));
   }
 
   for (const chunk of chunks) {
@@ -355,11 +433,15 @@ export const saveBatchFabricsToFirestore = async (fabrics: Fabric[]) => {
       }
       try {
           await batch.commit();
+          console.log("Lote guardado correctamente.");
       } catch (e) {
           console.error("Batch save failed", e);
+          // If batch fails, try saving locally
           chunk.forEach(f => saveLocalFabric(f));
       }
   }
+  
+  if (onProgress) onProgress(fabrics.length, fabrics.length);
 };
 
 export const deleteFabricFromFirestore = async (fabricId: string) => {
