@@ -223,45 +223,59 @@ const UploadModal: React.FC<UploadModalProps> = ({ isOpen, onClose, onSave, onBu
     setStep('processing');
     setExtractedFabrics([]);
 
+    // 1. Grouping Logic (Safe)
+    const groups: Record<string, File[]> = {};
     try {
-      const groups: Record<string, File[]> = {};
-      
-      // LOGIC UPDATE: Handle both structured folders (webkitRelativePath) and flat mobile selections
-      files.forEach(f => {
-          let key = 'Lote Cargado'; // Default for mobile/flat files
-          
-          if (f.webkitRelativePath) {
-              const parts = f.webkitRelativePath.split('/');
-              if (parts.length > 2) key = parts[1]; // Subfolder name
-              else if (parts.length === 2) key = parts[0]; // Root folder name
-          }
-          
-          if (!groups[key]) groups[key] = [];
-          groups[key].push(f);
-      });
+        files.forEach(f => {
+            let key = 'Lote Cargado'; 
+            if (f.webkitRelativePath) {
+                const parts = f.webkitRelativePath.split('/');
+                if (parts.length > 2) key = parts[1];
+                else if (parts.length === 2) key = parts[0];
+            }
+            if (!groups[key]) groups[key] = [];
+            groups[key].push(f);
+        });
+    } catch (e) {
+        console.error("Error grouping files:", e);
+        alert('Error al agrupar los archivos.');
+        setStep('upload');
+        return;
+    }
 
-      const groupKeys = Object.keys(groups);
-      const results: Partial<Fabric>[] = [];
+    const groupKeys = Object.keys(groups);
+    const results: Partial<Fabric>[] = [];
 
-      for (let i = 0; i < groupKeys.length; i++) {
-          const key = groupKeys[i];
-          const groupFiles = groups[key];
-          if (!groupFiles.some(f => f.type.startsWith('image/') || f.type === 'application/pdf')) continue;
-          
-          setCurrentProgress(`Analizando ${key}... (${i + 1}/${groupKeys.length})`);
-          
-          // Use 'Unknown' if we don't have a clear folder name, let AI figure it out from image content
-          const fabricNameHint = key === 'Lote Cargado' ? 'Unknown' : key;
-          
-          const fabricData = await analyzeFileGroup(groupFiles, fabricNameHint);
-          results.push(fabricData);
-      }
-      setExtractedFabrics(results);
-      setStep('review');
-    } catch (err: any) {
-      console.error("Processing error:", err?.message || "Unknown error");
-      alert('Error procesando archivos. Intenta de nuevo.');
-      setStep('upload');
+    // 2. Processing Loop (Robust)
+    for (let i = 0; i < groupKeys.length; i++) {
+        const key = groupKeys[i];
+        const groupFiles = groups[key];
+        
+        // Skip groups with no valid media
+        if (!groupFiles.some(f => f.type.startsWith('image/') || f.type === 'application/pdf')) continue;
+        
+        setCurrentProgress(`Analizando ${key}... (${i + 1}/${groupKeys.length})`);
+        
+        try {
+            const fabricNameHint = key === 'Lote Cargado' ? 'Unknown' : key;
+            const fabricData = await analyzeFileGroup(groupFiles, fabricNameHint);
+            
+            // Add to results successfully
+            results.push(fabricData);
+
+        } catch (innerErr: any) {
+            // If one folder fails, LOG IT but DO NOT STOP the loop.
+            console.error(`Error procesando grupo ${key}:`, innerErr?.message);
+        }
+    }
+
+    // 3. Finalize: Show whatever we managed to read
+    if (results.length > 0) {
+        setExtractedFabrics(results);
+        setStep('review');
+    } else {
+        alert('No se pudieron procesar los archivos. Verifica que sean válidos e inténtalo de nuevo.');
+        setStep('upload');
     }
   };
 
