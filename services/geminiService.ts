@@ -1,3 +1,4 @@
+
 import { GoogleGenAI, Type, GenerateContentResponse } from "@google/genai";
 
 // Ensure API Key is present
@@ -35,33 +36,20 @@ async function retryWithBackoff<T>(operation: () => Promise<T>, retries = 3, del
 export const extractFabricData = async (base64Data: string, mimeType: string) => {
   try {
     const prompt = `
-    You are a strict data extraction expert for "Creata Collection".
-    Analyze the provided document (PDF) or Image (Color Swatch).
+    You are a specialized data extractor for a textile catalog "Creata Collection".
+    Analyze the provided document (PDF) or Image (Header Card).
 
-    RULES FOR EXTRACTION:
-    
-    1. **FABRIC NAME (Nombre de la tela):**
-       - Extract ONLY the specific model name (e.g., "Analis", "Slate", "Bikendi").
-       - **FORBIDDEN:** Do NOT include the supplier name (e.g., DO NOT include "Formatex", "Creata", "Textiles").
-       - **FORBIDDEN:** Do NOT include color names in the main fabric name.
-       - If you are unsure, check the largest bold text but strip generic words.
-       
-    2. **SUPPLIER NAME (Nombre del proveedor):**
-       - Look for the legal entity, logo, or footer in the PDF/Image.
-       - If found, output the name.
-       - If strictly NOT found, return "Consultar".
-       
-    3. **COLOR NAMES (Nombre de color):**
-       - Look at the TEXT INSIDE THE IMAGE (OCR).
-       - If the image contains text labels (e.g., "Slate", "Ash", "102 Grey"), use that EXACT name.
-       - **FORBIDDEN:** Do not include the supplier name in the color name.
-       - If looking at a PDF list, extract the color names listed.
-    
-    4. **TECHNICAL SUMMARY:**
-       - Create a concise 3-4 line summary in **SPANISH**.
-       - Include Composition, Weight, and Martindale if available.
+    YOUR GOAL: Identify the main FABRIC MODEL NAME and TECHNICAL SPECS.
 
-    5. **SPECS:** Extract Composition, Martindale, Usage, Weight.
+    CRITICAL RULES FOR "NAME":
+    1. **FIND THE HEADER:** The Fabric Name is usually the largest, boldest text at the top of the PDF page or card.
+    2. **IGNORE SUPPLIERS:** Do NOT use "Formatex", "Creata", "Textiles", "Home", "Decor" as the name. These are companies.
+    3. **IGNORE COLLECTIONS:** Do NOT use "New Collection", "Water Repellent", "Easy Clean" as the name. These are features.
+    4. **FORMAT:** Return ONLY the specific model name (e.g., "ALANIS", "BIKENDI", "SLATE"). Capitalize it.
+
+    CRITICAL RULES FOR "SPECS":
+    1. Extract the technical details and translate them to SPANISH.
+    2. Look for "Composition", "Weight" (gr/m2), "Martindale" (cycles), and "Usage".
 
     Return JSON strictly adhering to this schema.
     `;
@@ -79,9 +67,9 @@ export const extractFabricData = async (base64Data: string, mimeType: string) =>
         responseSchema: {
           type: Type.OBJECT,
           properties: {
-            name: { type: Type.STRING, description: "The clean model name only. No supplier." },
-            supplier: { type: Type.STRING, description: "The manufacturer name." },
-            technicalSummary: { type: Type.STRING },
+            name: { type: Type.STRING, description: "The specific model name (e.g. ALANIS). Not the company." },
+            supplier: { type: Type.STRING, description: "The manufacturer name (e.g. Formatex)." },
+            technicalSummary: { type: Type.STRING, description: "A summary in Spanish of the technical features." },
             specs: {
               type: Type.OBJECT,
               properties: {
@@ -110,15 +98,18 @@ export const extractFabricData = async (base64Data: string, mimeType: string) =>
 export const extractColorFromSwatch = async (base64Data: string): Promise<string | null> => {
     try {
         const prompt = `
-        Look at this fabric swatch image.
-        Find the text label that represents the COLOR NAME.
+        Analyze this fabric swatch image to find the COLOR NAME text label.
+
+        CRITICAL LOCATION RULE:
+        - The color name is almost ALWAYS located in the **BOTTOM RIGHT** corner of the physical label/card in the photo.
+        - Sometimes it might be in the bottom left.
         
-        Rules:
-        1. It is usually located at the bottom right, bottom left, or bottom center.
-        2. Ignore supplier names like "Formatex", "Creata", "Textiles".
-        3. Ignore codes that look like ISBNs or phone numbers.
-        4. Return ONLY the extracted text of the color (e.g., "Ash", "Navy", "102 Grey").
-        5. If NO text is clearly a color name, return null.
+        EXTRACTION RULES:
+        1. Look for a number followed by a name (e.g., "05 SAND", "102 ASH") or just a name (e.g. "NAVY").
+        2. **IGNORE** company names (Formatex, Creata).
+        3. **IGNORE** website URLs or long codes.
+        4. Return **ONLY** the color name (and its number if present).
+        5. If the text is fuzzy, make your best guess based on standard textile color names.
         `;
 
         const response = await retryWithBackoff<GenerateContentResponse>(() => ai.models.generateContent({

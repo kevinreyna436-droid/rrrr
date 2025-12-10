@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react';
 import { Fabric } from '../types';
 import EditFabricModal from './EditFabricModal';
@@ -10,6 +11,11 @@ interface FabricDetailProps {
   onEdit: (updatedFabric: Fabric) => void;
   onDelete: (id: string) => void;
 }
+
+const toTitleCase = (str: string) => {
+  if (!str) return '';
+  return str.toLowerCase().split(' ').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ');
+};
 
 const FabricDetail: React.FC<FabricDetailProps> = ({ fabric, onBack, onEdit, onDelete }) => {
   const [showSpecs, setShowSpecs] = useState(false);
@@ -79,7 +85,7 @@ const FabricDetail: React.FC<FabricDetailProps> = ({ fabric, onBack, onEdit, onD
       const content = `
 CREATA COLLECTION - FICHA TÉCNICA
 ---------------------------------
-Modelo: ${fabric.name}
+Modelo: ${toTitleCase(fabric.name)}
 Proveedor: ${fabric.supplier}
 Catálogo: ${fabric.customCatalog || (fabric.category === 'wood' ? 'Colección Maderas' : 'Colección Textil')}
 
@@ -238,7 +244,7 @@ Generado automáticamente por Creata App
       <div className="sticky top-0 z-40 bg-[#f2f2f2]/90 backdrop-blur-sm px-6 py-3 flex items-center justify-center border-b border-gray-200/50">
         <div className="absolute left-6">
             <button onClick={onBack} className="flex items-center text-gray-400 hover:text-black transition-colors text-lg font-medium uppercase tracking-wide">
-            <svg className="w-6 h-6 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M10 19l-7-7m0 0l7-7m-7 7h18" /></svg>
+            <svg className="w-6 h-6" mr-2 fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M10 19l-7-7m0 0l7-7m-7 7h18" /></svg>
             Volver
             </button>
         </div>
@@ -260,8 +266,8 @@ Generado automáticamente por Creata App
         {/* 1. Centered Header Info */}
         <div className="mb-6 space-y-2">
             <h2 className="text-gray-400 italic font-serif text-base tracking-wide">CREATA</h2>
-            <h1 className="font-serif text-6xl md:text-8xl font-bold text-slate-900 tracking-tight leading-none uppercase">
-                {fabric.name}
+            <h1 className="font-serif text-6xl md:text-8xl font-bold text-slate-900 tracking-tight leading-none">
+                {toTitleCase(fabric.name)}
             </h1>
             <p className="text-sm text-gray-500 font-bold uppercase tracking-[0.25em] pt-2">
                 {fabric.supplier}
@@ -311,7 +317,7 @@ Generado automáticamente por Creata App
                     </div>
                     
                     <p className="mt-3 text-lg font-bold text-slate-900 uppercase tracking-widest text-center group-hover:text-black transition-colors">
-                      {color}
+                      {toTitleCase(color)}
                     </p>
                   </div>
                 );

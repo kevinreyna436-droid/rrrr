@@ -1,3 +1,4 @@
+
 import React from 'react';
 import { Fabric } from '../types';
 
@@ -8,6 +9,11 @@ interface FabricCardProps {
   specificColorName?: string;
   index: number;
 }
+
+const toTitleCase = (str: string) => {
+  if (!str) return '';
+  return str.toLowerCase().split(' ').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ');
+};
 
 const FabricCard: React.FC<FabricCardProps> = ({ fabric, onClick, mode, specificColorName }) => {
   // Determine which image to show
@@ -65,7 +71,7 @@ const FabricCard: React.FC<FabricCardProps> = ({ fabric, onClick, mode, specific
             <>
               {/* Main Title */}
               <h3 className="font-serif text-lg md:text-xl font-medium text-slate-800 leading-tight mb-1 group-hover:text-black transition-colors px-1 line-clamp-1">
-                {fabric.name}
+                {toTitleCase(fabric.name)}
               </h3>
               {/* Subtitle */}
               <p className="text-[10px] md:text-xs font-semibold text-gray-400 uppercase tracking-widest leading-none">
@@ -82,12 +88,12 @@ const FabricCard: React.FC<FabricCardProps> = ({ fabric, onClick, mode, specific
             <>
               {/* Main Title - EXACTLY SAME CLASS AS MODEL */}
               <h3 className="font-serif text-lg md:text-xl font-medium text-slate-800 leading-tight mb-1 group-hover:text-black transition-colors px-1 line-clamp-2 break-words">
-                {specificColorName}
+                {specificColorName ? toTitleCase(specificColorName) : ''}
               </h3>
               
               {/* Subtitle - EXACTLY SAME CLASS AS MODEL */}
               <p className="text-[10px] md:text-xs font-semibold text-gray-400 uppercase tracking-widest leading-none">
-                {fabric.name}
+                {toTitleCase(fabric.name)}
               </p>
                <p className="text-[9px] text-gray-300 font-semibold uppercase tracking-widest leading-none mt-1">
                 {fabric.supplier}
