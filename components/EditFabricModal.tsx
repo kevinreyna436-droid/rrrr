@@ -76,8 +76,8 @@ const EditFabricModal: React.FC<EditFabricModalProps> = ({ fabric, onClose, onSa
       setProcessingImageId(`color-${editingColorIndex}`);
 
       try {
-          // HIGH QUALITY: 2560px, 0.95
-          const base64 = await compressImage(file, 2560, 0.95);
+          // OPTIMIZED: 1920px, 0.80
+          const base64 = await compressImage(file, 1920, 0.80);
           
           setFormData(prev => {
               let newMain = prev.mainImage;
@@ -105,7 +105,7 @@ const EditFabricModal: React.FC<EditFabricModalProps> = ({ fabric, onClose, onSa
           const file = e.target.files[0];
           setProcessingImageId('specs');
           try {
-              const base64 = await compressImage(file, 2560, 0.95);
+              const base64 = await compressImage(file, 1920, 0.80);
               setFormData(prev => ({ ...prev, specsImage: base64 }));
           } catch(err) {
               alert("Error subiendo imagen de ficha técnica.");

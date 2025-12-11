@@ -139,13 +139,14 @@ export default function App() {
 
   const handleSaveFabric = async (newFabric: Fabric) => {
     try {
+      // Single save can stay optimistic as it is small
       setFabrics(prev => {
           const exists = prev.some(f => f.name.toLowerCase() === newFabric.name.toLowerCase());
           if (exists) return prev;
           return [newFabric, ...prev];
       });
       await saveFabricToFirestore(newFabric);
-      setOfflineStatus(isOfflineMode()); // Update status after save attempt
+      setOfflineStatus(isOfflineMode()); 
     } catch (e: any) {
       console.error("Error saving fabric:", e?.message || "Unknown error");
     }
@@ -153,15 +154,19 @@ export default function App() {
 
   const handleBulkSaveFabrics = async (newFabrics: Fabric[], onProgress?: (c: number, t: number) => void) => {
     try {
-      setFabrics(prev => {
-          const currentNames = new Set(prev.map(f => f.name.toLowerCase()));
-          const uniqueNew = newFabrics.filter(f => !currentNames.has(f.name.toLowerCase()));
-          return [...uniqueNew, ...prev];
-      });
+      // MEMORY OPTIMIZATION: Do NOT update state optimistically for bulk items.
+      // 1. Wait for the heavy upload process to finish completely.
       await saveBatchFabricsToFirestore(newFabrics, onProgress);
-      setOfflineStatus(isOfflineMode()); // Update status after save attempt
+      
+      // 2. Clear memory (implicitly done as function stack clears)
+      // 3. Reload fresh data from source.
+      await loadData();
+      
+      setOfflineStatus(isOfflineMode()); 
     } catch (e: any) {
       console.error("Error bulk saving:", e?.message || "Unknown error");
+      // Even if error, try to reload what was saved
+      await loadData();
     }
   };
 
@@ -169,7 +174,7 @@ export default function App() {
     try {
       setFabrics(prev => prev.map(f => f.id === updatedFabric.id ? updatedFabric : f));
       await saveFabricToFirestore(updatedFabric);
-      setOfflineStatus(isOfflineMode()); // Update status after save attempt
+      setOfflineStatus(isOfflineMode()); 
     } catch (e: any) {
       console.error("Error updating fabric:", e?.message || "Unknown error");
     }
@@ -181,7 +186,7 @@ export default function App() {
           setView('grid');
           setSelectedFabricId(null);
           await deleteFabricFromFirestore(fabricId);
-          setOfflineStatus(isOfflineMode()); // Update status after delete attempt
+          setOfflineStatus(isOfflineMode()); 
       } catch (e: any) {
           console.error("Error deleting fabric:", e?.message || "Unknown error");
           alert("Hubo un error al eliminar la ficha.");
@@ -194,7 +199,7 @@ export default function App() {
             setFabrics([]);
             await clearFirestoreCollection();
             setUploadModalOpen(false);
-            setOfflineStatus(false); // Optimistically reset status
+            setOfflineStatus(false); 
             alert("Catálogo reseteado. Recarga la página para verificar conexión.");
             window.location.reload();
           } catch (e: any) {
@@ -658,6 +663,7 @@ export default function App() {
         onSave={handleSaveFabric} 
         onBulkSave={handleBulkSaveFabrics}
         onReset={handleReset}
+        existingFabrics={fabrics} 
       />
 
       <ChatBot />

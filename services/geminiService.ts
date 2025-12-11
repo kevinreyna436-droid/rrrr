@@ -11,19 +11,47 @@ const ai = new GoogleGenAI({ apiKey: apiKey || 'dummy-key' });
 
 /**
  * Helper function to retry operations with exponential backoff.
- * Handles 503 (Service Unavailable) and 429 (Too Many Requests).
+ * Handles 503 (Service Unavailable) and 429 (Too Many Requests / Quota).
  */
-async function retryWithBackoff<T>(operation: () => Promise<T>, retries = 3, delay = 1000): Promise<T> {
+async function retryWithBackoff<T>(operation: () => Promise<T>, retries = 5, delay = 2000): Promise<T> {
   try {
     return await operation();
   } catch (error: any) {
-    const errorCode = error?.status || error?.code;
-    const isTransientError = errorCode === 503 || errorCode === 429 || (error.message && error.message.includes('overloaded'));
+    // PARSE ERROR: Check for nested error structures often returned by the library/API
+    const nestedError = error?.error || error;
+    const errorCode = nestedError?.status || nestedError?.code || error?.status || error?.code;
+    const errorMessage = (nestedError?.message || error?.message || String(error)).toLowerCase();
+    
+    // DETECT QUOTA ISSUES
+    const isQuotaError = 
+        errorCode === 429 || 
+        errorCode === 'RESOURCE_EXHAUSTED' || 
+        errorMessage.includes('quota') || 
+        errorMessage.includes('exhausted') ||
+        errorMessage.includes('429');
+        
+    const isTransientError = 
+        errorCode === 503 || 
+        errorMessage.includes('overloaded') || 
+        isQuotaError;
 
     if (retries > 0 && isTransientError) {
-      console.warn(`Gemini API overloaded or rate-limited (${errorCode}). Retrying in ${delay}ms...`);
-      await new Promise(resolve => setTimeout(resolve, delay));
-      return retryWithBackoff(operation, retries - 1, delay * 2);
+      let waitTime = delay;
+      
+      if (isQuotaError) {
+          console.warn(`⚠️ API Quota Hit (429). Pausing for 60 seconds to recover...`);
+          waitTime = 60000; // Fixed 60s wait for quota recovery
+      } else {
+          console.warn(`Gemini API busy (${errorCode}). Retrying in ${waitTime/1000}s...`);
+      }
+      
+      await new Promise(resolve => setTimeout(resolve, waitTime));
+      
+      // If it's a quota error, we stick to the 60s wait.
+      // If it's another error, we double the delay.
+      const nextDelay = isQuotaError ? 60000 : delay * 2;
+      
+      return retryWithBackoff(operation, retries - 1, nextDelay);
     }
     throw error;
   }
@@ -86,8 +114,14 @@ export const extractFabricData = async (base64Data: string, mimeType: string) =>
 
     return JSON.parse(response.text || '{}');
   } catch (error: any) {
-    console.error("Error extracting fabric data:", error?.message || String(error));
-    throw error;
+    // Graceful fallback for Quota Exhausted or Extraction errors
+    console.warn("AI Extraction skipped (Quota/Error). Using manual entry fallback.", error?.message);
+    return {
+        name: "Unknown",
+        supplier: "Unknown",
+        technicalSummary: "",
+        specs: {}
+    };
   }
 };
 

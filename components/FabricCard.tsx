@@ -10,6 +10,7 @@ interface FabricCardProps {
   index: number;
 }
 
+// Helper to Capitalize First Letter (e.g. "alanis" -> "Alanis")
 const toTitleCase = (str: string) => {
   if (!str) return '';
   return str.toLowerCase().split(' ').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ');
@@ -37,12 +38,13 @@ const FabricCard: React.FC<FabricCardProps> = ({ fabric, onClick, mode, specific
             src={displayImage} 
             alt={mode === 'model' ? fabric.name : `${fabric.name} - ${specificColorName}`} 
             className="w-full h-full object-cover object-center transition-transform duration-700 scale-[1.1] group-hover:scale-[1.15]"
+            loading="lazy"
           />
         ) : (
           <div className="w-full h-full flex items-center justify-center bg-gray-50 group-hover:bg-gray-100 transition-colors">
             <div className="text-center">
               <span className="block font-serif text-3xl md:text-4xl text-gray-200 font-bold opacity-50 mb-2">
-                 {fabric.name.charAt(0)}
+                 {fabric.name.charAt(0).toUpperCase()}
               </span>
               <span className="text-[10px] uppercase tracking-widest text-gray-300">
                  Sin Foto
@@ -67,35 +69,38 @@ const FabricCard: React.FC<FabricCardProps> = ({ fabric, onClick, mode, specific
       <div className="h-[30%] px-4 pb-2 text-center flex flex-col items-center justify-start pt-3 bg-white relative z-20">
         <div className="w-full flex flex-col justify-center h-full space-y-1">
           {mode === 'model' ? (
-            /* VISTA MODELOS */
+            /* --- VISTA MODELOS --- */
+            /* Jerarquía: 1. Nombre Modelo (Title Case) / 2. Proveedor (UPPERCASE) */
             <>
-              {/* Main Title */}
+              {/* Main Title: MODEL NAME */}
               <h3 className="font-serif text-lg md:text-xl font-medium text-slate-800 leading-tight mb-1 group-hover:text-black transition-colors px-1 line-clamp-1">
                 {toTitleCase(fabric.name)}
               </h3>
-              {/* Subtitle */}
-              <p className="text-[10px] md:text-xs font-semibold text-gray-400 uppercase tracking-widest leading-none">
+              {/* Subtitle: SUPPLIER (Uppercase for contrast) */}
+              <p className="text-[10px] md:text-xs font-bold text-gray-400 uppercase tracking-[0.2em] leading-none">
                 {fabric.supplier}
               </p>
               
-              {/* Colors List (Footer info) */}
+              {/* Footer: Colors count or list */}
               <p className="text-[9px] text-gray-300 font-normal uppercase leading-snug px-1 tracking-wide line-clamp-1 mt-2">
-                {colorList.join(', ')}
+                {colorList.length > 0 ? `${colorList.length} Colores` : 'Sin Variantes'}
               </p>
             </>
           ) : (
-            /* VISTA COLORES */
+            /* --- VISTA COLORES --- */
+            /* Jerarquía: 1. Nombre Color (Title Case) / 2. Nombre Modelo (UPPERCASE) */
             <>
-              {/* Main Title - EXACTLY SAME CLASS AS MODEL */}
+              {/* Main Title: SPECIFIC COLOR NAME */}
               <h3 className="font-serif text-lg md:text-xl font-medium text-slate-800 leading-tight mb-1 group-hover:text-black transition-colors px-1 line-clamp-2 break-words">
-                {specificColorName ? toTitleCase(specificColorName) : ''}
+                {specificColorName ? toTitleCase(specificColorName) : 'Sin Nombre'}
               </h3>
               
-              {/* Subtitle - EXACTLY SAME CLASS AS MODEL */}
-              <p className="text-[10px] md:text-xs font-semibold text-gray-400 uppercase tracking-widest leading-none">
-                {toTitleCase(fabric.name)}
+              {/* Subtitle: MODEL NAME (Uppercase to act as "Collection Name") */}
+              <p className="text-[10px] md:text-xs font-bold text-gray-400 uppercase tracking-[0.2em] leading-none">
+                {fabric.name}
               </p>
-               <p className="text-[9px] text-gray-300 font-semibold uppercase tracking-widest leading-none mt-1">
+               {/* Tiny Supplier below */}
+               <p className="text-[9px] text-gray-300 font-semibold uppercase tracking-widest leading-none mt-1 opacity-60">
                 {fabric.supplier}
               </p>
             </>

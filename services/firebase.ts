@@ -106,20 +106,16 @@ const uploadImageToStorage = async (base64String: string, path: string): Promise
     try {
         if (!base64String || base64String.startsWith('http')) return base64String;
         
-        console.log(`[STORAGE] Iniciando subida para: ${path}`);
+        // Remove data:image... prefix if present for clean processing, though uploadString handles it with 'data_url'
+        // console.log(`[STORAGE] Iniciando subida para: ${path}`);
         const storageRef = ref(storage, path);
         
         const metadata = {
             contentType: 'image/jpeg',
         };
 
-        // Use uploadString for robust Base64 handling
-        // 'data_url' automatically parses the "data:image/jpg;base64,..." header
         await uploadString(storageRef, base64String, 'data_url', metadata);
-        
-        console.log(`[STORAGE] Subida completada. Obteniendo URL...`);
         const downloadURL = await getDownloadURL(storageRef);
-        console.log(`[STORAGE] URL Final: ${downloadURL}`);
         return downloadURL;
 
     } catch (error: any) {
@@ -127,16 +123,11 @@ const uploadImageToStorage = async (base64String: string, path: string): Promise
 
         // ALERT USER SPECIFICALLY ABOUT CONFIG ERRORS
         if (error.code === 'storage/unauthorized') {
-            console.error("PERMISOS DENEGADOS. Revisa Firebase Rules.");
-            throw new Error("Storage Permission Denied: Revisa las Reglas en Firebase Console."); 
+            throw new Error("Storage Permission Denied"); 
         } else if (error.code === 'storage/object-not-found' || error.code === 'storage/bucket-not-found') {
-             console.error("BUCKET NO ENCONTRADO. Revisa 'storageBucket' en firebaseConfig.");
-             throw new Error("Bucket Not Found: El nombre del bucket en config no coincide con Firebase.");
+             throw new Error("Bucket Not Found");
         } else if (error.message && error.message.includes('CORS')) {
-            console.error("ERROR CORS. Falta configurar cors.json en Google Cloud.");
-            throw new Error("CORS Error: Configura CORS en Google Cloud Console.");
-        } else if (error.code === 'storage/retry-limit-exceeded') {
-            throw new Error("Conexión lenta o inestable. Se excedió el límite de reintentos.");
+            throw new Error("CORS Error");
         }
         
         throw error; 
@@ -154,13 +145,12 @@ const processFabricImagesForStorage = async (fabric: Fabric): Promise<Fabric> =>
         try {
             return await uploadImageToStorage(data, path);
         } catch (e: any) {
-            console.error("Image upload failed.", e);
-            // If upload fails due to configuration, we throw to stop the process
+            console.error("Image upload failed.", e.message);
+            // Critical config errors should stop execution to alert user
             if (e.message.includes("CORS") || e.message.includes("Permission") || e.message.includes("Bucket")) {
                 throw e; 
             }
-            // For network errors, we return the original base64 temporarily, 
-            // BUT the batch saver will strip it to avoid "Payload too large".
+            // Transient errors return specific flag
             throw new Error("UploadFailed"); 
         }
     };
@@ -176,10 +166,8 @@ const processFabricImagesForStorage = async (fabric: Fabric): Promise<Fabric> =>
             updatedFabric.specsImage = await safeUpload(updatedFabric.specsImage, path);
         }
         
-        // Handle PDF if it's base64 (Storage it!)
         if (updatedFabric.pdfUrl && updatedFabric.pdfUrl.startsWith('data:')) {
              const path = `fabrics/${updatedFabric.id}/specs_${timestamp}.pdf`;
-             // Reuse safeUpload logic but for PDF
              if (!globalOfflineMode) {
                  const storageRef = ref(storage, path);
                  await uploadString(storageRef, updatedFabric.pdfUrl, 'data_url', { contentType: 'application/pdf' });
@@ -196,8 +184,6 @@ const processFabricImagesForStorage = async (fabric: Fabric): Promise<Fabric> =>
                     try {
                         newColorImages[colorName] = await safeUpload(base64, path);
                     } catch (e) {
-                         // If one color fails, we skip it or keep base64? 
-                         // To avoid crashing the whole batch, we skip the image for this color.
                          console.warn(`Skipping color image ${colorName} due to upload error`);
                          newColorImages[colorName] = ''; 
                     }
@@ -299,13 +285,12 @@ export const testStorageConnection = async (): Promise<{success: boolean; messag
     try {
         const storageRef = ref(storage, 'connection_check.txt');
         await uploadString(storageRef, "ping", 'raw');
-        return { success: true, message: "Conexión a Storage exitosa. El sistema de archivos funciona." };
+        return { success: true, message: "Conexión a Storage exitosa." };
     } catch (e: any) {
         console.error("Storage Diagnostic Error:", e);
         let msg = `Error desconocido: ${e.message}`;
-        if (e.message && e.message.includes('CORS')) msg = "ERROR CRÍTICO: CORS bloqueando subida. Falta configurar Google Cloud.";
-        if (e.code === 'storage/unauthorized') msg = "ERROR CRÍTICO: Permisos denegados. Configura las 'Rules' de Storage a 'public'.";
-        if (e.code === 'storage/object-not-found' || e.code === 'storage/bucket-not-found') msg = "ERROR CRÍTICO: No se encuentra el Bucket de almacenamiento. Verifica el nombre en firebaseConfig.";
+        if (e.message && e.message.includes('CORS')) msg = "ERROR CRÍTICO: CORS bloqueando subida.";
+        if (e.code === 'storage/unauthorized') msg = "ERROR CRÍTICO: Permisos denegados.";
         return { success: false, message: msg };
     }
 };
@@ -319,23 +304,18 @@ export const saveFabricToFirestore = async (fabric: Fabric) => {
   }
 
   try {
-    console.log("Iniciando proceso de subida de imágenes...");
     fabricToSave = await processFabricImagesForStorage(fabric);
   } catch (error: any) {
-    console.error("Error en subida de imágenes:", error);
     if (error.message.includes("CORS") || error.message.includes("Permission") || error.message.includes("Bucket")) {
         alert(`NO SE PUEDEN SUBIR FOTOS: ${error.message}`);
         throw error; 
     }
-    // For single saves, we might warn but still allow saving text? 
-    // Let's prompt user or just fail safe.
     if (!window.confirm("Falló la subida de algunas imágenes. ¿Guardar solo los datos de texto?")) {
         throw error;
     }
-    // Clean images to allow text save
+    // Fallback: Save text only if image upload failed
     fabricToSave.mainImage = fabricToSave.mainImage.startsWith('http') ? fabricToSave.mainImage : '';
     fabricToSave.specsImage = fabricToSave.specsImage?.startsWith('http') ? fabricToSave.specsImage : '';
-    // Clear heavy base64 colors
     const cleanColors: Record<string, string> = {};
     for (const [k, v] of Object.entries(fabricToSave.colorImages || {})) {
         if (v.startsWith('http')) cleanColors[k] = v;
@@ -345,14 +325,9 @@ export const saveFabricToFirestore = async (fabric: Fabric) => {
 
   try {
     const cleanFabric = createCleanFabricObject(fabricToSave);
-    if (!cleanFabric.id) throw new Error("Invalid ID");
-    
     const savePromise = setDoc(doc(db, COLLECTION_NAME, cleanFabric.id), cleanFabric, { merge: true });
-    const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('TIMEOUT_SAVE')), 20000));
-    
-    await Promise.race([savePromise, timeoutPromise]);
-    console.log("Documento guardado en base de datos.");
-    
+    await savePromise;
+    console.log("Documento guardado.");
   } catch (error: any) {
     console.warn("Error guardando en Firestore:", error);
     if (error.message && error.message.includes("exceeds the maximum allowed size")) {
@@ -364,6 +339,9 @@ export const saveFabricToFirestore = async (fabric: Fabric) => {
   }
 };
 
+// --- CHUNKED SAVING FOR ROBUSTNESS ---
+// Updated to CHUNK_SIZE = 1 to ensure immediate saving of every single processed item.
+
 export const saveBatchFabricsToFirestore = async (
     fabrics: Fabric[], 
     onProgress?: (current: number, total: number) => void
@@ -374,74 +352,76 @@ export const saveBatchFabricsToFirestore = async (
       return;
   }
   
-  // STEP 1: Process Images for ALL fabrics
-  const processedFabrics: Fabric[] = [];
+  const TOTAL = fabrics.length;
+  let overallProcessed = 0;
   
-  console.log(`Iniciando carga masiva de ${fabrics.length} elementos...`);
+  // CHUNK_SIZE = 1 means we save to DB after EVERY single fabric processing.
+  // This is the most reliable method for large batches on unstable connections.
+  const CHUNK_SIZE = 1; 
   
-  for (let i = 0; i < fabrics.length; i++) {
-      if (onProgress) onProgress(i, fabrics.length); 
-      
-      const fabric = fabrics[i];
-      try {
-          const processed = await processFabricImagesForStorage(fabric);
-          processedFabrics.push(processed);
-          console.log(`Imágenes procesadas para ${i+1}/${fabrics.length}: ${fabric.name}`);
-      } catch (e: any) {
-          console.error(`Fallo procesando imágenes para ${fabric.name}`, e);
-          
-          // CRITICAL FIX: If storage upload fails, DO NOT push the original fabric with Base64.
-          // This causes the "Payload size exceeds limit" error in Firestore.
-          // Instead, strip the images and save only text + technical data.
-          const strippedFabric = { ...fabric };
-          
-          // Keep existing URLs if any, but remove Base64
-          strippedFabric.mainImage = strippedFabric.mainImage?.startsWith('http') ? strippedFabric.mainImage : '';
-          strippedFabric.specsImage = strippedFabric.specsImage?.startsWith('http') ? strippedFabric.specsImage : '';
-          strippedFabric.pdfUrl = strippedFabric.pdfUrl?.startsWith('http') ? strippedFabric.pdfUrl : '';
+  console.log(`Iniciando guardado 1 a 1 de ${TOTAL} elementos...`);
 
-          const cleanColors: Record<string, string> = {};
-          if (strippedFabric.colorImages) {
-              for (const [k, v] of Object.entries(strippedFabric.colorImages)) {
-                  if (v && v.startsWith('http')) cleanColors[k] = v;
-              }
-          }
-          strippedFabric.colorImages = cleanColors;
-          
-          // Append error note
-          strippedFabric.technicalSummary = (strippedFabric.technicalSummary || '') + " [NOTA SISTEMA: Error subiendo imágenes a la nube]";
-          
-          processedFabrics.push(strippedFabric);
-      }
-  }
+  for (let i = 0; i < TOTAL; i += CHUNK_SIZE) {
+      const chunk = fabrics.slice(i, i + CHUNK_SIZE);
+      const processedChunk: Fabric[] = [];
 
-  // STEP 2: Batch Save to Firestore
-  // Reduced Batch Size to avoid 10MB limit
-  const BATCH_SIZE = 50; 
-  const chunks = [];
-  
-  for (let i = 0; i < processedFabrics.length; i += BATCH_SIZE) {
-      chunks.push(processedFabrics.slice(i, i + BATCH_SIZE));
-  }
-
-  for (const chunk of chunks) {
-      const batch = writeBatch(db);
+      // 1. Process Images for this chunk
       for (const fabric of chunk) {
-           const cleanFabric = createCleanFabricObject(fabric);
-           const ref = doc(db, COLLECTION_NAME, cleanFabric.id);
-           batch.set(ref, cleanFabric, { merge: true });
+          if (onProgress) onProgress(overallProcessed, TOTAL);
+          try {
+              // Add a small delay to yield to the UI thread, preventing the browser from freezing
+              // during large loops of heavy image processing.
+              await new Promise(resolve => setTimeout(resolve, 100));
+
+              const processed = await processFabricImagesForStorage(fabric);
+              processedChunk.push(processed);
+              console.log(`[${overallProcessed + 1}/${TOTAL}] Imágenes listas: ${fabric.name}`);
+          } catch (e: any) {
+              console.error(`Fallo imágenes en ${fabric.name}`, e);
+              
+              // Fallback: Strip Base64 to save at least text
+              const strippedFabric = { ...fabric };
+              strippedFabric.mainImage = strippedFabric.mainImage?.startsWith('http') ? strippedFabric.mainImage : '';
+              strippedFabric.specsImage = strippedFabric.specsImage?.startsWith('http') ? strippedFabric.specsImage : '';
+              strippedFabric.pdfUrl = strippedFabric.pdfUrl?.startsWith('http') ? strippedFabric.pdfUrl : '';
+              const cleanColors: Record<string, string> = {};
+              if (strippedFabric.colorImages) {
+                  for (const [k, v] of Object.entries(strippedFabric.colorImages)) {
+                      if (v && v.startsWith('http')) cleanColors[k] = v;
+                  }
+              }
+              strippedFabric.colorImages = cleanColors;
+              strippedFabric.technicalSummary = (strippedFabric.technicalSummary || '') + " [ERROR IMAGENES]";
+              
+              processedChunk.push(strippedFabric);
+          }
+          overallProcessed++;
       }
-      try {
-          await batch.commit();
-          console.log("Lote guardado correctamente.");
-      } catch (e) {
-          console.error("Batch save failed", e);
-          // If batch fails, try saving locally
-          chunk.forEach(f => saveLocalFabric(f));
+
+      // 2. Immediate Save to Firestore for this chunk (which is just 1 item now)
+      if (processedChunk.length > 0) {
+          const batch = writeBatch(db);
+          processedChunk.forEach(f => {
+              const cleanFabric = createCleanFabricObject(f);
+              const ref = doc(db, COLLECTION_NAME, cleanFabric.id);
+              batch.set(ref, cleanFabric, { merge: true });
+          });
+
+          try {
+              await batch.commit();
+              console.log(`Item ${i + 1} guardado en DB.`);
+          } catch (e) {
+              console.error("Error guardando en DB", e);
+              // Try local save if cloud fails
+              processedChunk.forEach(f => saveLocalFabric(f));
+          }
       }
+      
+      // Update UI
+      if (onProgress) onProgress(overallProcessed, TOTAL);
   }
   
-  if (onProgress) onProgress(fabrics.length, fabrics.length);
+  console.log("Carga masiva finalizada.");
 };
 
 export const deleteFabricFromFirestore = async (fabricId: string) => {

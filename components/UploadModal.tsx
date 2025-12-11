@@ -1,5 +1,5 @@
 
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { extractFabricData, extractColorFromSwatch } from '../services/geminiService';
 import { MASTER_FABRIC_DB } from '../constants';
 import { Fabric } from '../types';
@@ -11,12 +11,14 @@ interface UploadModalProps {
   onSave: (fabric: Fabric) => Promise<void> | void;
   onBulkSave?: (fabrics: Fabric[], onProgress?: (current: number, total: number) => void) => Promise<void> | void;
   onReset?: () => void;
+  existingFabrics?: Fabric[]; // Added to check for duplicates
 }
 
-const UploadModal: React.FC<UploadModalProps> = ({ isOpen, onClose, onSave, onBulkSave, onReset }) => {
+const UploadModal: React.FC<UploadModalProps> = ({ isOpen, onClose, onSave, onBulkSave, onReset, existingFabrics = [] }) => {
   const [step, setStep] = useState<'upload' | 'processing' | 'review'>('upload');
   const [files, setFiles] = useState<File[]>([]);
   const [extractedFabrics, setExtractedFabrics] = useState<Partial<Fabric>[]>([]);
+  const [skippedFabrics, setSkippedFabrics] = useState<string[]>([]); // To store duplicate names
   const [currentProgress, setCurrentProgress] = useState<string>('');
   
   // Save Progress State
@@ -33,6 +35,22 @@ const UploadModal: React.FC<UploadModalProps> = ({ isOpen, onClose, onSave, onBu
       type: 'main' | 'color' | 'add_color'; 
       colorName?: string; 
   } | null>(null);
+
+  // PREVENT ACCIDENTAL TAB CLOSURE
+  useEffect(() => {
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (step === 'processing' || isSaving) {
+        const msg = "Hay una subida en curso. Si sales, se perderá el progreso.";
+        e.preventDefault();
+        e.returnValue = msg;
+        return msg;
+      }
+    };
+    if (isOpen) {
+        window.addEventListener('beforeunload', handleBeforeUnload);
+    }
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, [isOpen, step, isSaving]);
 
   if (!isOpen) return null;
 
@@ -56,8 +74,8 @@ const UploadModal: React.FC<UploadModalProps> = ({ isOpen, onClose, onSave, onBu
             const file = e.target.files[0];
             const { fabricIndex, type, colorName } = activeUpload;
             
-            // HIGH QUALITY: 2560px, 0.95 quality
-            const base64 = await compressImage(file, 2560, 0.95);
+            // OPTIMIZED: 1600px, 0.75 quality for edits too
+            const base64 = await compressImage(file, 1600, 0.75);
 
             setExtractedFabrics(prev => {
                 const updated = [...prev];
@@ -109,19 +127,16 @@ const UploadModal: React.FC<UploadModalProps> = ({ isOpen, onClose, onSave, onBu
       try {
         if (pdfFile) {
             const base64Data = await fileToBase64(pdfFile);
-            // Limit PDF size being sent to AI analysis to avoid payload error
-            // If it's a huge PDF, we might need to skip analysis or rely on filename
             if (base64Data.length < 3000000) {
                  rawData = await extractFabricData(base64Data.split(',')[1], 'application/pdf');
             } else {
                  console.warn("PDF too large for AI analysis, skipping extraction.");
             }
-            // Store full PDF (up to a limit) or relies on later storage upload
             rawData.pdfUrl = base64Data;
 
         } else if (imgFiles.length > 0) {
-            // LOW RES for AI Analysis (800px) - avoids 500 Error
-            const aiAnalysisImg = await compressImage(imgFiles[0], 800, 0.80);
+            // LOW RES for AI Analysis (800px)
+            const aiAnalysisImg = await compressImage(imgFiles[0], 800, 0.70);
             rawData = await extractFabricData(aiAnalysisImg.split(',')[1], 'image/jpeg');
         }
       } catch (e: any) {
@@ -161,11 +176,14 @@ const UploadModal: React.FC<UploadModalProps> = ({ isOpen, onClose, onSave, onBu
         }
 
         try {
-            // HIGH QUALITY STORAGE: 2560px, 0.95
-            const base64Img = await compressImage(file, 2560, 0.95);
+            // THROTTLE: Increase delay to 6 seconds per image to be EXTREMELY safe
+            await new Promise(resolve => setTimeout(resolve, 6000));
+
+            // OPTIMIZED STORAGE: 1600px, 0.75
+            const base64Img = await compressImage(file, 1600, 0.75);
             
-            // LOW QUALITY FOR AI: 800px (Faster, no 500 errors)
-            const base64ImgSmall = await compressImage(file, 800, 0.80);
+            // LOW QUALITY FOR AI: 800px
+            const base64ImgSmall = await compressImage(file, 800, 0.70);
 
             // Pass SMALL image to AI
             let detectedName = await extractColorFromSwatch(base64ImgSmall.split(',')[1]);
@@ -195,7 +213,7 @@ const UploadModal: React.FC<UploadModalProps> = ({ isOpen, onClose, onSave, onBu
 
             if (detectedName) {
                 if (!colorImages[detectedName]) {
-                    colorImages[detectedName] = base64Img; // Store High Quality
+                    colorImages[detectedName] = base64Img;
                     detectedColorsList.push(detectedName);
                 }
             }
@@ -215,7 +233,7 @@ const UploadModal: React.FC<UploadModalProps> = ({ isOpen, onClose, onSave, onBu
           mainImageToUse = Object.values(colorImages)[0];
       } else if (imgFiles.length > 0) {
           try {
-            mainImageToUse = await compressImage(imgFiles[0], 2560, 0.95);
+            mainImageToUse = await compressImage(imgFiles[0], 1600, 0.75);
           } catch(e) {
             mainImageToUse = '';
           }
@@ -235,6 +253,7 @@ const UploadModal: React.FC<UploadModalProps> = ({ isOpen, onClose, onSave, onBu
     if (files.length === 0) return;
     setStep('processing');
     setExtractedFabrics([]);
+    setSkippedFabrics([]);
 
     // 1. Grouping Logic (Safe)
     const groups: Record<string, File[]> = {};
@@ -258,8 +277,12 @@ const UploadModal: React.FC<UploadModalProps> = ({ isOpen, onClose, onSave, onBu
 
     const groupKeys = Object.keys(groups);
     const results: Partial<Fabric>[] = [];
+    const duplicatesFound: string[] = [];
 
-    // 2. Processing Loop (Robust)
+    // Helper to check existing
+    const existingNamesNormalized = existingFabrics.map(f => f.name.toLowerCase().trim());
+
+    // 2. Processing Loop (Robust with yields)
     for (let i = 0; i < groupKeys.length; i++) {
         const key = groupKeys[i];
         const groupFiles = groups[key];
@@ -267,23 +290,43 @@ const UploadModal: React.FC<UploadModalProps> = ({ isOpen, onClose, onSave, onBu
         // Skip groups with no valid media
         if (!groupFiles.some(f => f.type.startsWith('image/') || f.type === 'application/pdf')) continue;
         
+        // HEURISTIC 1: Check Folder Name against DB
+        const cleanKey = key.toLowerCase().trim();
+        // Ignore "lote cargado" generic folder for duplicate check
+        if (cleanKey !== 'lote cargado' && existingNamesNormalized.includes(cleanKey)) {
+             console.log(`Duplicate detected by folder name: ${key}`);
+             duplicatesFound.push(key);
+             continue; // SKIP PROCESSING
+        }
+
+        // Notify user about the safety pause
+        setCurrentProgress(`Pausando 15s para proteger límite API...`);
+        // THROTTLE: Increase delay to 15 seconds per folder group.
+        await new Promise(resolve => setTimeout(resolve, 15000));
+        
         setCurrentProgress(`Analizando ${key}... (${i + 1}/${groupKeys.length})`);
         
         try {
             const fabricNameHint = key === 'Lote Cargado' ? 'Unknown' : key;
             const fabricData = await analyzeFileGroup(groupFiles, fabricNameHint);
-            
-            // Add to results successfully
-            results.push(fabricData);
 
+            // HEURISTIC 2: Check Extracted Name against DB
+            const extractedNameClean = (fabricData.name || '').toLowerCase().trim();
+            if (extractedNameClean && extractedNameClean !== 'unknown' && existingNamesNormalized.includes(extractedNameClean)) {
+                 console.log(`Duplicate detected by analysis: ${fabricData.name}`);
+                 duplicatesFound.push(fabricData.name || "Sin Nombre");
+                 continue; // SKIP ADDING TO RESULTS
+            }
+
+            results.push(fabricData);
         } catch (innerErr: any) {
-            // If one folder fails, LOG IT but DO NOT STOP the loop.
             console.error(`Error procesando grupo ${key}:`, innerErr?.message);
         }
     }
 
-    // 3. Finalize: Show whatever we managed to read
-    if (results.length > 0) {
+    setSkippedFabrics(duplicatesFound);
+
+    if (results.length > 0 || duplicatesFound.length > 0) {
         setExtractedFabrics(results);
         setStep('review');
     } else {
@@ -332,18 +375,16 @@ const UploadModal: React.FC<UploadModalProps> = ({ isOpen, onClose, onSave, onBu
             });
         }
         
-        // Only close if successful
         setTimeout(() => {
-            setStep('upload');
+            // Release memory immediately
             setFiles([]);
             setExtractedFabrics([]);
+            setStep('upload');
             onClose();
         }, 500);
 
     } catch (error: any) {
         console.error("Save error:", error);
-        // Do NOT close the modal on error, allowing retry.
-        // Error alert is handled in firebase.ts services layer now.
     } finally {
         setIsSaving(false);
     }
@@ -403,7 +444,7 @@ const UploadModal: React.FC<UploadModalProps> = ({ isOpen, onClose, onSave, onBu
                             ? `Subiendo ${saveProgress.current} de ${saveProgress.total} fichas` 
                             : 'Finalizando subida...'}
                     </p>
-                    <p className="text-xs text-gray-400 mt-1">Estamos subiendo las imágenes en alta calidad.</p>
+                    <p className="text-xs text-red-400 font-bold mt-2 uppercase tracking-wide">No cierres esta ventana</p>
                 </div>
              </div>
         ) : (
@@ -412,7 +453,6 @@ const UploadModal: React.FC<UploadModalProps> = ({ isOpen, onClose, onSave, onBu
                   <div className="space-y-6 flex-1 overflow-y-auto">
                     
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        {/* Option 1: Desktop Folder Upload */}
                         <label className="border-2 border-dashed border-gray-300 rounded-2xl p-6 flex flex-col items-center justify-center cursor-pointer hover:bg-gray-50 transition-colors h-48 text-center relative group">
                             <svg className="w-10 h-10 text-gray-400 mb-3 group-hover:text-black transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" /></svg>
                             <span className="font-bold text-gray-700 group-hover:text-black">Subir Carpeta (PC)</span>
@@ -426,7 +466,6 @@ const UploadModal: React.FC<UploadModalProps> = ({ isOpen, onClose, onSave, onBu
                             />
                         </label>
 
-                        {/* Option 2: Mobile/Drive Upload */}
                         <label className="border-2 border-dashed border-blue-200 bg-blue-50/30 rounded-2xl p-6 flex flex-col items-center justify-center cursor-pointer hover:bg-blue-50 transition-colors h-48 text-center relative group">
                             <svg className="w-10 h-10 text-blue-500 mb-3 group-hover:scale-110 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
                             <span className="font-bold text-blue-800">Fotos / Drive (Móvil)</span>
@@ -478,6 +517,7 @@ const UploadModal: React.FC<UploadModalProps> = ({ isOpen, onClose, onSave, onBu
                     <div>
                         <p className="font-serif text-lg animate-pulse">Analizando con Gemini AI...</p>
                         <p className="text-xs text-gray-400 mt-2">{currentProgress}</p>
+                        <p className="text-xs text-red-400 font-bold mt-2 uppercase tracking-wide">No cierres esta ventana</p>
                     </div>
                   </div>
                 )}
@@ -485,12 +525,29 @@ const UploadModal: React.FC<UploadModalProps> = ({ isOpen, onClose, onSave, onBu
                 {step === 'review' && (
                   <div className="flex flex-col h-full overflow-hidden">
                      <div className="flex-1 overflow-y-auto pr-2 space-y-4">
-                         <div className="bg-green-50 p-4 rounded-xl mb-4 flex items-center justify-between">
+                         
+                         {/* SUCCESS ALERT */}
+                         <div className="bg-green-50 p-4 rounded-xl mb-2 flex items-center justify-between">
                             <div>
                                 <h3 className="text-lg font-serif text-green-800">¡Análisis Completo!</h3>
-                                <p className="text-xs text-green-600">Se han detectado {extractedFabrics.length} modelos. Revisa y selecciona qué subir.</p>
+                                <p className="text-xs text-green-600">Se han detectado {extractedFabrics.length} modelos nuevos. Revisa y selecciona qué subir.</p>
                             </div>
                          </div>
+                         
+                         {/* SKIPPED ALERT */}
+                         {skippedFabrics.length > 0 && (
+                             <div className="bg-yellow-50 p-4 rounded-xl mb-4 border border-yellow-100">
+                                <h3 className="text-sm font-bold text-yellow-800 uppercase tracking-wide mb-2 flex items-center">
+                                    <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>
+                                    Archivos Omitidos (Ya existen)
+                                </h3>
+                                <ul className="list-disc list-inside text-xs text-yellow-700 space-y-1">
+                                    {skippedFabrics.map((name, i) => (
+                                        <li key={i}>{name}</li>
+                                    ))}
+                                </ul>
+                             </div>
+                         )}
                          
                          {extractedFabrics.map((f, i) => (
                              <div key={i} className="flex flex-col gap-4 p-6 bg-gray-50 rounded-3xl border border-gray-100 transition-all hover:shadow-lg hover:bg-white relative">
