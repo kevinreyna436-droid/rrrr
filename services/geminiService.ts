@@ -39,17 +39,17 @@ async function retryWithBackoff<T>(operation: () => Promise<T>, retries = 5, del
       let waitTime = delay;
       
       if (isQuotaError) {
-          console.warn(`⚠️ API Quota Hit (429). Pausing for 60 seconds to recover...`);
-          waitTime = 60000; // Fixed 60s wait for quota recovery
+          console.warn(`⚠️ API Quota Hit (429). Pausing for 70 seconds to recover...`);
+          waitTime = 70000; // Increased to 70s to be safer against strict limits
       } else {
           console.warn(`Gemini API busy (${errorCode}). Retrying in ${waitTime/1000}s...`);
       }
       
       await new Promise(resolve => setTimeout(resolve, waitTime));
       
-      // If it's a quota error, we stick to the 60s wait.
+      // If it's a quota error, we stick to the long wait.
       // If it's another error, we double the delay.
-      const nextDelay = isQuotaError ? 60000 : delay * 2;
+      const nextDelay = isQuotaError ? 70000 : delay * 2;
       
       return retryWithBackoff(operation, retries - 1, nextDelay);
     }
@@ -117,9 +117,9 @@ export const extractFabricData = async (base64Data: string, mimeType: string) =>
     // Graceful fallback for Quota Exhausted or Extraction errors
     console.warn("AI Extraction skipped (Quota/Error). Using manual entry fallback.", error?.message);
     return {
-        name: "Unknown",
+        name: "Revisar (Límite AI)", // Explicit name so user knows to edit it
         supplier: "Unknown",
-        technicalSummary: "",
+        technicalSummary: "Información pendiente de revisión manual.",
         specs: {}
     };
   }

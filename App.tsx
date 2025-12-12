@@ -83,17 +83,18 @@ export default function App() {
   // Run diagnostic on mount
   useEffect(() => {
     const runDiag = async () => {
-        const result = await testStorageConnection();
-        setDiagnosticResult(result);
-        // Hide success message after 5 seconds, keep error persistent until clicked
-        if (result.success) {
-            setTimeout(() => setDiagnosticResult(null), 5000);
+        // Don't auto-run full diagnostic on every reload as it writes to DB, but check connection
+        if (!isOfflineMode()) {
+            // Optional: Silent check
         }
     };
-    if (!isOfflineMode()) {
-        runDiag();
-    }
     loadData();
+    window.addEventListener('online', () => setOfflineStatus(false));
+    window.addEventListener('offline', () => setOfflineStatus(true));
+    return () => {
+        window.removeEventListener('online', () => setOfflineStatus(false));
+        window.removeEventListener('offline', () => setOfflineStatus(true));
+    };
   }, []);
 
   const handleRetryConnection = async () => {
@@ -105,18 +106,27 @@ export default function App() {
           const result = await testStorageConnection();
           setDiagnosticResult(result);
       } else {
-          alert("No se pudo conectar. Seguimos en modo local.");
+          alert("No se pudo conectar. Seguimos en modo offline.");
       }
       setLoading(false);
   };
 
   const handleDiagnostic = async () => {
       const result = await testStorageConnection();
-      alert(`DIAGNÓSTICO DE NUBE:\n\n${result.message}\n\nSuccess: ${result.success}`);
+      alert(`ESTADO DEL SISTEMA:\n\n${result.message}\n\nConectado: ${result.success ? 'SÍ' : 'NO'}`);
   };
 
   const handleUploadClick = () => {
       setPinModalOpen(true);
+  };
+
+  const handleShareClick = () => {
+      const url = "https://creata-catalogo.web.app";
+      navigator.clipboard.writeText(url).then(() => {
+          alert("Link copiado al portapapeles: " + url);
+      }).catch(() => {
+          alert("Link: " + url);
+      });
   };
 
   const handleFabricClick = (fabric: Fabric, specificColor?: string) => {
@@ -154,18 +164,11 @@ export default function App() {
 
   const handleBulkSaveFabrics = async (newFabrics: Fabric[], onProgress?: (c: number, t: number) => void) => {
     try {
-      // MEMORY OPTIMIZATION: Do NOT update state optimistically for bulk items.
-      // 1. Wait for the heavy upload process to finish completely.
       await saveBatchFabricsToFirestore(newFabrics, onProgress);
-      
-      // 2. Clear memory (implicitly done as function stack clears)
-      // 3. Reload fresh data from source.
       await loadData();
-      
       setOfflineStatus(isOfflineMode()); 
     } catch (e: any) {
       console.error("Error bulk saving:", e?.message || "Unknown error");
-      // Even if error, try to reload what was saved
       await loadData();
     }
   };
@@ -194,13 +197,13 @@ export default function App() {
   };
 
   const handleReset = async () => {
-      if(window.confirm("¿Estás seguro de que quieres borrar TODA la información? Esto reiniciará la base de datos y permitirá reconectar si la nube estaba caída.")) {
+      if(window.confirm("¿Estás seguro de que quieres borrar TODA la información de la nube? ESTA ACCIÓN NO SE PUEDE DESHACER.")) {
           try {
             setFabrics([]);
             await clearFirestoreCollection();
             setUploadModalOpen(false);
             setOfflineStatus(false); 
-            alert("Catálogo reseteado. Recarga la página para verificar conexión.");
+            alert("Catálogo reseteado correctamente.");
             window.location.reload();
           } catch (e: any) {
             console.error("Error resetting collection:", e?.message || "Unknown error");
@@ -375,7 +378,7 @@ export default function App() {
          </div>
       )}
 
-      {/* Connection Status Indicator */}
+      {/* Cloud Status Indicator */}
       <div className="fixed top-4 left-4 z-50 flex items-center space-x-2">
          {offlineStatus ? (
              <div className="flex items-center space-x-2 bg-red-100 text-red-600 px-3 py-1 rounded-full border border-red-200 shadow-sm animate-pulse cursor-pointer" onClick={handleRetryConnection} title="Intentar Reconectar">
@@ -387,7 +390,7 @@ export default function App() {
             <div 
                 onClick={handleDiagnostic}
                 className="flex items-center space-x-2 bg-white/80 backdrop-blur text-green-600 px-3 py-1 rounded-full border border-green-100 shadow-sm cursor-pointer hover:bg-green-50 transition-colors"
-                title="Click para Diagnóstico de Subida"
+                title="Click para comprobar estado de Nube"
             >
                 <div className="w-2 h-2 rounded-full bg-green-500"></div>
                 <span className="text-[10px] font-bold uppercase tracking-wide">Nube Conectada</span>
@@ -395,13 +398,23 @@ export default function App() {
          )}
       </div>
 
-      <button 
-        onClick={handleUploadClick}
-        className="fixed top-4 right-4 z-50 text-gray-300 hover:text-black font-bold text-2xl w-8 h-8 flex items-center justify-center rounded-full hover:bg-white transition-colors"
-        title="Subir Archivos / Gestionar"
-      >
-        .
-      </button>
+      <div className="fixed top-4 right-4 z-50 flex items-center gap-2">
+          <button 
+            onClick={handleShareClick}
+            className="text-gray-400 hover:text-black font-bold text-sm w-8 h-8 flex items-center justify-center rounded-full hover:bg-white transition-colors"
+            title="Compartir Link de la App"
+          >
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z" /></svg>
+          </button>
+
+          <button 
+            onClick={handleUploadClick}
+            className="text-gray-300 hover:text-black font-bold text-2xl w-8 h-8 flex items-center justify-center rounded-full hover:bg-white transition-colors"
+            title="Subir Archivos / Gestionar"
+          >
+            .
+          </button>
+      </div>
 
       {/* PIN Modal for Upload */}
       <PinModal 
@@ -523,7 +536,6 @@ export default function App() {
             ) : filteredItemCount === 0 && activeTab !== 'wood' ? (
                 <div className="text-center py-20 text-gray-300">
                      <p>El catálogo está vacío.</p>
-                     {offlineStatus && <p className="text-xs mt-2 text-red-300">Revisa que la base de datos esté creada en Firebase Console.</p>}
                      <div className="mt-4">
                         <button 
                            onClick={handleUploadClick}
