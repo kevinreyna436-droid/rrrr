@@ -54,24 +54,37 @@ export default function App() {
       // Update offline status after fetch attempt
       setOfflineStatus(isOfflineMode());
 
+      let loadedFabrics: Fabric[] = [];
+
       if (dbData && dbData.length > 0) {
         // DEDUPLICATION LOGIC:
-        const uniqueFabrics: Fabric[] = [];
         const seenNames = new Set<string>();
 
         dbData.forEach(fabric => {
             const normalizedName = fabric.name.trim().toLowerCase();
             if (!seenNames.has(normalizedName)) {
                 seenNames.add(normalizedName);
-                uniqueFabrics.push(fabric);
+                loadedFabrics.push(fabric);
             }
         });
-
-        setFabrics(uniqueFabrics);
+        setFabrics(loadedFabrics);
       } else {
         // FALLBACK: If DB is empty, use INITIAL_FABRICS (which is now empty)
         setFabrics(INITIAL_FABRICS); 
       }
+
+      // DEEP LINK CHECK: After loading data, check if URL has an ID
+      const params = new URLSearchParams(window.location.search);
+      const linkedId = params.get('fabricId');
+      
+      if (linkedId) {
+          const found = loadedFabrics.find(f => f.id === linkedId);
+          if (found) {
+              setSelectedFabricId(linkedId);
+              setView('detail');
+          }
+      }
+
     } catch (e: any) {
       console.error("Error loading data", e?.message || "Unknown error");
       setFabrics([]); // Start empty on error
@@ -80,14 +93,32 @@ export default function App() {
     }
   };
 
-  // Run diagnostic on mount
+  // Run diagnostic on mount & Handle Browser Back Button
   useEffect(() => {
     loadData();
+    
+    // Offline/Online listeners
     window.addEventListener('online', () => setOfflineStatus(false));
     window.addEventListener('offline', () => setOfflineStatus(true));
+
+    // Handle Browser Back/Forward buttons
+    const handlePopState = () => {
+        const params = new URLSearchParams(window.location.search);
+        const id = params.get('fabricId');
+        if (id) {
+            setSelectedFabricId(id);
+            setView('detail');
+        } else {
+            setView('grid');
+            setSelectedFabricId(null);
+        }
+    };
+    window.addEventListener('popstate', handlePopState);
+
     return () => {
         window.removeEventListener('online', () => setOfflineStatus(false));
         window.removeEventListener('offline', () => setOfflineStatus(true));
+        window.removeEventListener('popstate', handlePopState);
     };
   }, []);
 
@@ -121,6 +152,12 @@ export default function App() {
     if (activeTab === 'model' || activeTab === 'wood') {
         setSelectedFabricId(fabric.id);
         setView('detail');
+        
+        // DEEP LINKING: Update URL without reloading
+        const newUrl = new URL(window.location.href);
+        newUrl.searchParams.set('fabricId', fabric.id);
+        window.history.pushState({}, '', newUrl);
+
     } else {
         const img = specificColor && fabric.colorImages?.[specificColor] 
             ? fabric.colorImages[specificColor] 
@@ -135,14 +172,21 @@ export default function App() {
     }
   };
 
+  // Logic to return to grid and clear URL
+  const handleBackToGrid = () => {
+      setView('grid');
+      setSelectedFabricId(null);
+      
+      // DEEP LINKING: Remove param from URL
+      const newUrl = new URL(window.location.href);
+      newUrl.searchParams.delete('fabricId');
+      window.history.pushState({}, '', newUrl.pathname + newUrl.search);
+  };
+
   const handleSaveFabric = async (newFabric: Fabric) => {
     try {
-      // Single save can stay optimistic as it is small
-      setFabrics(prev => {
-          const exists = prev.some(f => f.name.toLowerCase() === newFabric.name.toLowerCase());
-          if (exists) return prev;
-          return [newFabric, ...prev];
-      });
+      // Optimistic Update: Allow Duplicates (user can handle them manually if needed)
+      setFabrics(prev => [newFabric, ...prev]);
       await saveFabricToFirestore(newFabric);
       setOfflineStatus(isOfflineMode()); 
     } catch (e: any) {
@@ -174,8 +218,7 @@ export default function App() {
   const handleDeleteFabric = async (fabricId: string) => {
       try {
           setFabrics(prev => prev.filter(f => f.id !== fabricId));
-          setView('grid');
-          setSelectedFabricId(null);
+          handleBackToGrid(); // Clear view and URL
           await deleteFabricFromFirestore(fabricId);
           setOfflineStatus(isOfflineMode()); 
       } catch (e: any) {
@@ -202,9 +245,15 @@ export default function App() {
 
   const goToDetailFromLightbox = () => {
     if (colorLightbox) {
-        setSelectedFabricId(colorLightbox.fabricId);
+        const fabricId = colorLightbox.fabricId;
+        setSelectedFabricId(fabricId);
         setView('detail');
         setColorLightbox(null);
+        
+        // Update URL
+        const newUrl = new URL(window.location.href);
+        newUrl.searchParams.set('fabricId', fabricId);
+        window.history.pushState({}, '', newUrl);
     }
   };
 
@@ -604,7 +653,7 @@ export default function App() {
         {view === 'detail' && selectedFabricId && (
           <FabricDetail 
             fabric={fabrics.find(f => f.id === selectedFabricId)!} 
-            onBack={() => setView('grid')}
+            onBack={handleBackToGrid}
             onEdit={handleUpdateFabric}
             onDelete={handleDeleteFabric}
           />

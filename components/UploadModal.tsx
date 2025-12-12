@@ -1,7 +1,6 @@
 
 import React, { useState, useRef, useEffect } from 'react';
 import { extractFabricData, extractColorFromSwatch } from '../services/geminiService';
-import { MASTER_FABRIC_DB } from '../constants';
 import { Fabric } from '../types';
 import { compressImage } from '../utils/imageCompression';
 
@@ -18,7 +17,11 @@ const UploadModal: React.FC<UploadModalProps> = ({ isOpen, onClose, onSave, onBu
   const [step, setStep] = useState<'upload' | 'processing' | 'review'>('upload');
   const [files, setFiles] = useState<File[]>([]);
   const [extractedFabrics, setExtractedFabrics] = useState<Partial<Fabric>[]>([]);
-  const [skippedFabrics, setSkippedFabrics] = useState<string[]>([]); // To store duplicate names
+  
+  // Tracking skipped/rejected items
+  const [duplicates, setDuplicates] = useState<string[]>([]);
+  const [rejectedFiles, setRejectedFiles] = useState<{name: string, reason: string}[]>([]);
+  
   const [currentProgress, setCurrentProgress] = useState<string>('');
   
   // Save Progress State
@@ -244,7 +247,8 @@ const UploadModal: React.FC<UploadModalProps> = ({ isOpen, onClose, onSave, onBu
     if (files.length === 0) return;
     setStep('processing');
     setExtractedFabrics([]);
-    setSkippedFabrics([]);
+    setDuplicates([]);
+    setRejectedFiles([]);
 
     // 1. Grouping Logic (Safe)
     const groups: Record<string, File[]> = {};
@@ -269,6 +273,7 @@ const UploadModal: React.FC<UploadModalProps> = ({ isOpen, onClose, onSave, onBu
     const groupKeys = Object.keys(groups);
     const results: Partial<Fabric>[] = [];
     const duplicatesFound: string[] = [];
+    const rejectsFound: {name: string, reason: string}[] = [];
 
     // Helper to check existing
     const existingNamesNormalized = existingFabrics.map(f => f.name.toLowerCase().trim());
@@ -281,15 +286,8 @@ const UploadModal: React.FC<UploadModalProps> = ({ isOpen, onClose, onSave, onBu
         // Skip groups with no valid media
         if (!groupFiles.some(f => f.type.startsWith('image/') || f.type === 'application/pdf')) continue;
         
-        // HEURISTIC 1: Check Folder Name against DB
-        const cleanKey = key.toLowerCase().trim();
-        // Ignore "lote cargado" generic folder for duplicate check
-        if (cleanKey !== 'lote cargado' && existingNamesNormalized.includes(cleanKey)) {
-             console.log(`Duplicate detected by folder name: ${key}`);
-             duplicatesFound.push(key);
-             continue; // SKIP PROCESSING
-        }
-
+        // REMOVED BLOCKING DUPLICATE CHECK
+        
         // Notify user about the safety pause
         setCurrentProgress(`Pausando 15s para proteger límite API...`);
         // THROTTLE: Increase delay to 15 seconds per folder group.
@@ -301,46 +299,30 @@ const UploadModal: React.FC<UploadModalProps> = ({ isOpen, onClose, onSave, onBu
             const fabricNameHint = key === 'Lote Cargado' ? 'Unknown' : key;
             const fabricData = await analyzeFileGroup(groupFiles, fabricNameHint);
 
-            // STRICT VALIDATION RULES (PER USER REQUEST)
-            // 1. Must have a valid Name (Not Unknown)
-            if (!fabricData.name || fabricData.name === "Unknown") {
-                console.log(`Skipping ${key}: No valid Fabric Name found.`);
-                continue;
-            }
-
-            // 2. Must have valid Technical Specs (Composition, Martindale, or Weight)
-            const hasSpecs = fabricData.specs && (
-                (fabricData.specs.composition && fabricData.specs.composition.length > 2) ||
-                (fabricData.specs.martindale && fabricData.specs.martindale.length > 2) ||
-                (fabricData.specs.weight && fabricData.specs.weight.length > 2)
-            );
-
-            if (!hasSpecs) {
-                 console.log(`Skipping ${fabricData.name}: No valid technical specs found.`);
-                 continue;
-            }
-
-            // HEURISTIC 2: Check Extracted Name against DB
+            // Validation rules removed.
+            
+            // Check for duplicates just for alerting, BUT DO NOT SKIP
             const extractedNameClean = (fabricData.name || '').toLowerCase().trim();
             if (extractedNameClean && extractedNameClean !== 'unknown' && existingNamesNormalized.includes(extractedNameClean)) {
-                 console.log(`Duplicate detected by analysis: ${fabricData.name}`);
                  duplicatesFound.push(fabricData.name || "Sin Nombre");
-                 continue; // SKIP ADDING TO RESULTS
+                 // REMOVED 'continue' to allow re-uploading deleted items
             }
 
             results.push(fabricData);
         } catch (innerErr: any) {
             console.error(`Error procesando grupo ${key}:`, innerErr?.message);
+            rejectsFound.push({ name: key, reason: "Error desconocido en análisis" });
         }
     }
 
-    setSkippedFabrics(duplicatesFound);
+    setDuplicates(duplicatesFound);
+    setRejectedFiles(rejectsFound);
 
-    if (results.length > 0 || duplicatesFound.length > 0) {
+    if (results.length > 0) {
         setExtractedFabrics(results);
         setStep('review');
     } else {
-        alert('No se encontraron fichas válidas. Recuerda: Deben tener Nombre y Especificaciones Técnicas (Composición, Peso, etc).');
+        alert('No se encontraron archivos procesables.');
         setStep('upload');
     }
   };
@@ -544,16 +526,32 @@ const UploadModal: React.FC<UploadModalProps> = ({ isOpen, onClose, onSave, onBu
                             </div>
                          </div>
                          
-                         {/* SKIPPED ALERT */}
-                         {skippedFabrics.length > 0 && (
+                         {/* DUPLICATES WARNING (BUT NOT SKIPPED) */}
+                         {duplicates.length > 0 && (
                              <div className="bg-yellow-50 p-4 rounded-xl mb-4 border border-yellow-100">
                                 <h3 className="text-sm font-bold text-yellow-800 uppercase tracking-wide mb-2 flex items-center">
                                     <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>
-                                    Omitidos (Duplicados o Sin Datos)
+                                    Aviso: Nombres Repetidos Detectados
                                 </h3>
+                                <p className="text-xs text-yellow-700 mb-2">Estos modelos ya existen en tu catálogo. Si guardas, se crearán duplicados.</p>
                                 <ul className="list-disc list-inside text-xs text-yellow-700 space-y-1">
-                                    {skippedFabrics.map((name, i) => (
+                                    {duplicates.map((name, i) => (
                                         <li key={i}>{name}</li>
+                                    ))}
+                                </ul>
+                             </div>
+                         )}
+
+                         {/* REJECTED ALERT (Errors only) */}
+                         {rejectedFiles.length > 0 && (
+                             <div className="bg-red-50 p-4 rounded-xl mb-4 border border-red-100">
+                                <h3 className="text-sm font-bold text-red-800 uppercase tracking-wide mb-2 flex items-center">
+                                    <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>
+                                    Errores de Procesamiento
+                                </h3>
+                                <ul className="list-disc list-inside text-xs text-red-700 space-y-1">
+                                    {rejectedFiles.map((item, i) => (
+                                        <li key={i}><strong>{item.name}:</strong> {item.reason}</li>
                                     ))}
                                 </ul>
                              </div>
