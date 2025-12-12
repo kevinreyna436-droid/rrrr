@@ -1,27 +1,39 @@
 
 import { GoogleGenAI, Type, GenerateContentResponse } from "@google/genai";
 
-// DEFENSIVE KEY LOADING
-let apiKey = '';
+// SAFE INITIALIZATION WRAPPER
+let ai: GoogleGenAI | null = null;
+
 try {
-    // Rely on Vite replacement
-    apiKey = process.env.API_KEY || '';
+    // Attempt to get key from various sources safely
+    let apiKey = '';
+    
+    // Check process.env safely
+    if (typeof process !== 'undefined' && process.env) {
+        apiKey = process.env.API_KEY || '';
+    }
+    
+    // If empty, try checking if Vite injected it differently or use dummy
+    if (!apiKey) {
+        console.warn("API Key not found in process.env");
+        apiKey = 'dummy-key'; 
+    }
+
+    ai = new GoogleGenAI({ apiKey });
 } catch (e) {
-    console.warn("Could not read API_KEY from process.env");
+    console.error("Critical Error initializing Gemini SDK:", e);
+    // We do NOT re-throw here to avoid crashing the whole app import chain
+    // ai remains null, and we handle that in the functions below
 }
-
-if (!apiKey) {
-  console.warn("API_KEY is missing. AI features will fail gracefully.");
-}
-
-// Initialize safely. If no key, put a dummy so the app doesn't crash on load, 
-// but calls will fail later (which we catch).
-const ai = new GoogleGenAI({ apiKey: apiKey || 'dummy-key' });
 
 /**
  * Helper function to retry operations with exponential backoff.
  */
 async function retryWithBackoff<T>(operation: () => Promise<T>, retries = 2, delay = 2000): Promise<T> {
+  if (!ai) {
+      throw new Error("AI Service not initialized");
+  }
+
   try {
     return await operation();
   } catch (error: any) {
@@ -59,6 +71,8 @@ async function retryWithBackoff<T>(operation: () => Promise<T>, retries = 2, del
 }
 
 export const extractFabricData = async (base64Data: string, mimeType: string) => {
+  if (!ai) return { name: "Unknown", supplier: "Unknown", technicalSummary: "", colors: [], specs: {} };
+
   try {
     const prompt = `
     You are a specialized data extractor for a textile catalog "Creata Collection".
@@ -67,7 +81,7 @@ export const extractFabricData = async (base64Data: string, mimeType: string) =>
     Return JSON strictly.
     `;
 
-    const response = await retryWithBackoff<GenerateContentResponse>(() => ai.models.generateContent({
+    const response = await retryWithBackoff<GenerateContentResponse>(() => ai!.models.generateContent({
       model: 'gemini-2.5-flash',
       contents: {
         parts: [
@@ -112,8 +126,9 @@ export const extractFabricData = async (base64Data: string, mimeType: string) =>
 };
 
 export const extractColorFromSwatch = async (base64Data: string): Promise<string | null> => {
+    if (!ai) return null;
     try {
-        const response = await retryWithBackoff<GenerateContentResponse>(() => ai.models.generateContent({
+        const response = await retryWithBackoff<GenerateContentResponse>(() => ai!.models.generateContent({
             model: 'gemini-2.5-flash',
             contents: {
                 parts: [
@@ -137,8 +152,9 @@ export const extractColorFromSwatch = async (base64Data: string): Promise<string
 };
 
 export const generateFabricDesign = async (prompt: string, aspectRatio: string = "1:1", size: string = "1K") => {
+  if (!ai) throw new Error("AI not initialized");
   try {
-    const response = await retryWithBackoff<GenerateContentResponse>(() => ai.models.generateContent({
+    const response = await retryWithBackoff<GenerateContentResponse>(() => ai!.models.generateContent({
       model: 'gemini-3-pro-image-preview',
       contents: {
         parts: [{ text: `High quality fabric texture: ${prompt}` }]
@@ -162,8 +178,9 @@ export const generateFabricDesign = async (prompt: string, aspectRatio: string =
 };
 
 export const editFabricImage = async (base64Image: string, prompt: string) => {
+  if (!ai) throw new Error("AI not initialized");
   try {
-    const response = await retryWithBackoff<GenerateContentResponse>(() => ai.models.generateContent({
+    const response = await retryWithBackoff<GenerateContentResponse>(() => ai!.models.generateContent({
       model: 'gemini-2.5-flash-image',
       contents: {
         parts: [
@@ -183,8 +200,9 @@ export const editFabricImage = async (base64Image: string, prompt: string) => {
 };
 
 export const chatWithExpert = async (message: string, history: any[]) => {
+  if (!ai) return { text: "El sistema de IA no está disponible.", sources: [] };
   try {
-    const response = await retryWithBackoff<GenerateContentResponse>(() => ai.models.generateContent({
+    const response = await retryWithBackoff<GenerateContentResponse>(() => ai!.models.generateContent({
       model: 'gemini-3-pro-preview',
       contents: [
         ...history,

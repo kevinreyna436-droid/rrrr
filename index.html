@@ -55,16 +55,25 @@
         scrollbar-width: none;
       }
     </style>
-  <script type="importmap">
+    <!-- CRITICAL POLYFILL: Defines process.env globally before any module loads -->
+    <script>
+      window.process = {
+        env: {
+          NODE_ENV: 'development',
+          API_KEY: '' 
+        }
+      };
+    </script>
+<script type="importmap">
 {
   "imports": {
-    "react-dom/": "https://esm.sh/react-dom@18.3.1/",
-    "@google/genai": "https://esm.sh/@google/genai@0.21.0",
-    "@vitejs/plugin-react": "https://esm.sh/@vitejs/plugin-react@4.3.1",
-    "react/": "https://esm.sh/react@18.3.1/",
-    "react": "https://esm.sh/react@18.3.1",
-    "vite": "https://esm.sh/vite@5.4.10",
-    "firebase/": "https://esm.sh/firebase@10.14.1/"
+    "react/": "https://esm.sh/react@^19.2.3/",
+    "react": "https://esm.sh/react@^19.2.3",
+    "@google/genai": "https://esm.sh/@google/genai@^1.33.0",
+    "firebase/": "https://esm.sh/firebase@^12.6.0/",
+    "@vitejs/plugin-react": "https://esm.sh/@vitejs/plugin-react@^5.1.2",
+    "vite": "https://esm.sh/vite@^7.2.7",
+    "react-dom/": "https://esm.sh/react-dom@^19.2.3/"
   }
 }
 </script>
