@@ -25,8 +25,7 @@ type SortOption = 'newest' | 'color' | 'name' | 'model' | 'supplier';
 export default function App() {
   const [view, setView] = useState<AppView>('grid');
   
-  // STRATEGY CHANGE: Start with Demo Data immediately so the user sees something instantly.
-  // We will replace this if DB data loads successfully.
+  // STRATEGY: Start with Demo Data initially, but replace immediately if Cloud connects
   const [fabrics, setFabrics] = useState<Fabric[]>(INITIAL_FABRICS);
   const [isDemoMode, setIsDemoMode] = useState(true);
   
@@ -35,17 +34,17 @@ export default function App() {
   const [isPinModalOpen, setPinModalOpen] = useState(false); // PIN Modal State
   const [searchQuery, setSearchQuery] = useState('');
   const [activeTab, setActiveTab] = useState<'model' | 'color' | 'wood'>('model');
-  const [loading, setLoading] = useState(true); // Still show a small spinner, but data is visible underneath if we wanted
+  const [loading, setLoading] = useState(true); // Still show a small spinner
   const [offlineStatus, setOfflineStatus] = useState(false);
   
   // Toast Notification State
   const [toast, setToast] = useState<{message: string, type: 'success' | 'error' | 'info'} | null>(null);
   
-  // Sorting State - Default "newest" for immediate feedback
+  // Sorting State
   const [sortBy, setSortBy] = useState<SortOption>('newest');
   const [isFilterMenuOpen, setFilterMenuOpen] = useState(false);
 
-  // State for Color View Lightbox (Global Grid)
+  // State for Color View Lightbox
   const [colorLightbox, setColorLightbox] = useState<{
     isOpen: boolean;
     image: string;
@@ -59,42 +58,41 @@ export default function App() {
   };
 
   const loadData = async () => {
-    // We don't set fabrics to empty [] here, we keep INITIAL_FABRICS until we know better
     setLoading(true);
     try {
       const dbData = await getFabricsFromFirestore();
       
-      // Update offline status after fetch attempt
       setOfflineStatus(isOfflineMode());
 
-      if (dbData && dbData.length > 0) {
-        // DEDUPLICATION LOGIC:
-        const seenNames = new Set<string>();
-        const loadedFabrics: Fabric[] = [];
-
-        dbData.forEach(fabric => {
-            // Safety check for critical fields
-            if (!fabric.name) return;
-            
-            const normalizedName = fabric.name.trim().toLowerCase();
-            if (!seenNames.has(normalizedName)) {
-                seenNames.add(normalizedName);
-                loadedFabrics.push(fabric);
-            }
-        });
-        
-        // Only override if we actually got valid data
-        if (loadedFabrics.length > 0) {
+      if (dbData !== null) { 
+        // Connection Successful (even if empty)
+        if (dbData.length > 0) {
+            // DEDUPLICATION LOGIC
+            const seenNames = new Set<string>();
+            const loadedFabrics: Fabric[] = [];
+            dbData.forEach(fabric => {
+                if (!fabric.name) return;
+                const normalizedName = fabric.name.trim().toLowerCase();
+                if (!seenNames.has(normalizedName)) {
+                    seenNames.add(normalizedName);
+                    loadedFabrics.push(fabric);
+                }
+            });
             setFabrics(loadedFabrics);
-            setIsDemoMode(false);
+        } else {
+            // Connected but Empty DB -> Show Empty State (Remove Demo Data)
+            console.log("Cloud Connected: DB is empty.");
+            setFabrics([]); 
         }
+        setIsDemoMode(false);
       } else {
-        // DB is empty, stick with INITIAL_FABRICS (already set)
-        console.log("DB Empty, showing Demo Data");
+        // Connection Failed (dbData is null) -> Fallback to Demo
+        console.log("Connection Failed, showing Demo Data");
+        setFabrics(INITIAL_FABRICS);
         setIsDemoMode(true); 
       }
 
-      // DEEP LINK CHECK: After loading data, check if URL has an ID
+      // DEEP LINK CHECK
       const params = new URLSearchParams(window.location.search);
       const linkedId = params.get('fabricId');
       
@@ -112,8 +110,7 @@ export default function App() {
 
     } catch (e: any) {
       console.error("Error loading data", e?.message || "Unknown error");
-      // Don't show toast immediately to avoid annoying user on first load if it's just offline
-      // setFabrics(INITIAL_FABRICS); // Keep demo data
+      setFabrics(INITIAL_FABRICS);
       setIsDemoMode(true);
     } finally {
       setLoading(false);
@@ -122,13 +119,8 @@ export default function App() {
 
   // Run diagnostic on mount & Handle Browser Back Button
   useEffect(() => {
-    // Initial Load Sequence
     const init = async () => {
         await loadData();
-        
-        // Only run connection test if we are NOT in demo mode (meaning we think we have data) 
-        // OR if we want to debug why it failed.
-        // We run it silently to update status icon.
         const diag = await testStorageConnection();
         if (!diag.success && !diag.message.includes("Offline")) {
              console.warn("Storage check failed:", diag.message);
@@ -136,11 +128,9 @@ export default function App() {
     };
     init();
     
-    // Offline/Online listeners
-    window.addEventListener('online', () => { setOfflineStatus(false); loadData(); }); // Reload on reconnect
+    window.addEventListener('online', () => { setOfflineStatus(false); loadData(); });
     window.addEventListener('offline', () => setOfflineStatus(true));
 
-    // Handle Browser Back/Forward buttons
     const handlePopState = () => {
         const params = new URLSearchParams(window.location.search);
         const id = params.get('fabricId');
@@ -189,7 +179,6 @@ export default function App() {
         setSelectedFabricId(fabric.id);
         setView('detail');
         
-        // DEEP LINKING: Update URL without reloading
         const newUrl = new URL(window.location.href);
         newUrl.searchParams.set('fabricId', fabric.id);
         window.history.pushState({}, '', newUrl);
@@ -201,19 +190,17 @@ export default function App() {
             
         setColorLightbox({
             isOpen: true,
-            image: img || '', // Handle potentially empty image for lightbox
+            image: img || '',
             fabricId: fabric.id,
             colorName: specificColor || 'Unknown'
         });
     }
   };
 
-  // Logic to return to grid and clear URL
   const handleBackToGrid = () => {
       setView('grid');
       setSelectedFabricId(null);
       
-      // DEEP LINKING: Remove param from URL
       const newUrl = new URL(window.location.href);
       newUrl.searchParams.delete('fabricId');
       window.history.pushState({}, '', newUrl.pathname + newUrl.search);
@@ -221,18 +208,16 @@ export default function App() {
 
   const handleSaveFabric = async (newFabric: Fabric) => {
     try {
-      // Optimistic Update
       setFabrics(prev => {
-          // If we were in demo mode, clear demo data and start with real data
-          if (isDemoMode) return [newFabric];
+          if (isDemoMode) return [newFabric]; // Clear demo data on first save
           return [newFabric, ...prev];
       });
-      setIsDemoMode(false); // Disable demo mode immediately on first upload
+      setIsDemoMode(false); 
 
       await saveFabricToFirestore(newFabric);
       setOfflineStatus(isOfflineMode()); 
       showToast("Ficha guardada en la nube correctamente.", 'success');
-      setSortBy('newest'); // Auto-switch to newest so user sees it
+      setSortBy('newest'); 
     } catch (e: any) {
       console.error("Error saving fabric:", e?.message || "Unknown error");
       showToast("Guardado localmente (Error Nube). Se subirá al reconectar.", 'info');
@@ -242,11 +227,10 @@ export default function App() {
   const handleBulkSaveFabrics = async (newFabrics: Fabric[], onProgress?: (c: number, t: number) => void) => {
     try {
       await saveBatchFabricsToFirestore(newFabrics, onProgress);
-      // Reload to ensure full sync and clear demo mode
       await loadData();
       setOfflineStatus(isOfflineMode()); 
       showToast(`${newFabrics.length} fichas guardadas correctamente.`, 'success');
-      setSortBy('newest'); // Auto-switch to newest
+      setSortBy('newest'); 
     } catch (e: any) {
       console.error("Error bulk saving:", e?.message || "Unknown error");
       showToast("Error en carga masiva. Revisa tu conexión.", 'error');
@@ -268,7 +252,6 @@ export default function App() {
 
   const handleDeleteFabric = async (fabricId: string) => {
       try {
-          // If in demo mode, just remove locally
           if (isDemoMode) {
              setFabrics(prev => prev.filter(f => f.id !== fabricId));
              handleBackToGrid();
@@ -277,7 +260,7 @@ export default function App() {
           }
 
           setFabrics(prev => prev.filter(f => f.id !== fabricId));
-          handleBackToGrid(); // Clear view and URL
+          handleBackToGrid();
           await deleteFabricFromFirestore(fabricId);
           setOfflineStatus(isOfflineMode()); 
           showToast("Ficha eliminada de la nube.", 'success');
@@ -310,7 +293,6 @@ export default function App() {
         setView('detail');
         setColorLightbox(null);
         
-        // Update URL
         const newUrl = new URL(window.location.href);
         newUrl.searchParams.set('fabricId', fabricId);
         window.history.pushState({}, '', newUrl);
@@ -320,7 +302,6 @@ export default function App() {
   const getColorWeight = (colorName: string): number => {
       if (!colorName) return 50;
       const name = colorName.toLowerCase();
-      // ... (color weight logic kept same) ...
       if (name.includes('white') || name.includes('blanco')) return 100;
       if (name.includes('beige') || name.includes('sand')) return 85;
       if (name.includes('grey') || name.includes('gris')) return 50;
@@ -329,7 +310,7 @@ export default function App() {
   };
 
   const getFilteredItems = () => {
-    if (!fabrics) return []; // Safety check
+    if (!fabrics) return []; 
     let items = [...fabrics];
     if (searchQuery) {
         items = items.filter(f => 
@@ -413,8 +394,6 @@ export default function App() {
 
   const renderGridContent = () => {
     const items = getFilteredItems();
-    
-    // Safety check if items is somehow undefined
     if (!items) return null;
 
     if (activeTab === 'wood') {
@@ -426,7 +405,7 @@ export default function App() {
                 <div className="col-span-full text-center py-20 text-gray-400">
                     <h3 className="font-serif text-xl italic">No hay maderas cargadas.</h3>
                     {isDemoMode && (
-                        <p className="text-xs text-gray-400 mt-2">La demo solo muestra 2 telas y 1 madera. ¡Sube tus propias fotos!</p>
+                        <p className="text-xs text-gray-400 mt-2">Sube tus propias fotos para empezar.</p>
                     )}
                 </div>
             );

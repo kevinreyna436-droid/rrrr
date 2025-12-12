@@ -29,7 +29,6 @@ const UploadModal: React.FC<UploadModalProps> = ({ isOpen, onClose, onSave, onBu
   const [saveProgress, setSaveProgress] = useState({ current: 0, total: 0 });
 
   const [selectedCategory, setSelectedCategory] = useState<'model' | 'wood'>('model');
-  const [expandedSpecsIndex, setExpandedSpecsIndex] = useState<number | null>(null);
   
   // Ref only for the single image replacement input
   const singleImageInputRef = useRef<HTMLInputElement>(null);
@@ -324,20 +323,13 @@ const UploadModal: React.FC<UploadModalProps> = ({ isOpen, onClose, onSave, onBu
         console.error("Save error:", error);
         
         let msg = "Error guardando los productos.";
-        if (error.message === "PERMISSION_DENIED_STORAGE") {
-            msg = "⛔ ERROR DE PERMISOS (STORAGE): No se pueden subir las fotos. Ve a Firebase Console -> Storage -> Rules y cámbialo a 'allow read, write: if true;'";
-        } else if (error.message === "PERMISSION_DENIED_DB") {
-            msg = "⛔ ERROR DE PERMISOS (DB): No se pueden guardar datos. Ve a Firebase Console -> Firestore -> Rules y cámbialo a 'allow read, write: if true;'";
-        } else if (error.message === "STORAGE_FAILED_IMAGE_TOO_LARGE") {
-            msg = "⚠️ ERROR CRÍTICO: Falló la subida de imágenes a Storage y son demasiado grandes para guardarse directamente en la base de datos. Verifica tu conexión a internet o la configuración de Firebase Storage (CORS).";
-        } else if (error.message === "DOC_TOO_LARGE") {
-            msg = "⚠️ ERROR: La ficha es demasiado pesada (más de 1MB). Probablemente las imágenes no se subieron al Storage correctamente.";
-        } else if (error.code === 'resource-exhausted') {
-            msg = "Error: El archivo es demasiado grande para la base de datos.";
+        if (error.message === "DOC_TOO_LARGE") {
+            msg = "⚠️ AVISO: Hubo un problema con la Nube y la imagen comprimida aún es demasiado grande para el respaldo. Intenta subir solo 1 foto por ahora.";
+        } else {
+            msg = "⚠️ Hubo un error de conexión, pero es posible que parte de la información se haya guardado localmente.";
         }
         
         alert(msg);
-        // Don't close modal on error so they can retry
     } finally {
         setIsSaving(false);
     }
