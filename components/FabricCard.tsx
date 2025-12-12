@@ -70,20 +70,20 @@ const FabricCard: React.FC<FabricCardProps> = ({ fabric, onClick, mode, specific
         <div className="w-full flex flex-col justify-center h-full space-y-1">
           {mode === 'model' ? (
             /* --- VISTA MODELOS --- */
-            /* Jerarquía: 1. Nombre Modelo (Title Case) / 2. Proveedor (UPPERCASE) */
+            /* Jerarquía: 1. Nombre Modelo (Title Case) / 2. Proveedor (UPPERCASE) / 3. Footer (Lista Colores) */
             <>
               {/* Main Title: MODEL NAME */}
               <h3 className="font-serif text-lg md:text-xl font-medium text-slate-800 leading-tight mb-1 group-hover:text-black transition-colors px-1 line-clamp-1">
                 {toTitleCase(fabric.name)}
               </h3>
-              {/* Subtitle: SUPPLIER (Uppercase for contrast) */}
+              {/* Subtitle: SUPPLIER (Uppercase for contrast, spaced) */}
               <p className="text-[10px] md:text-xs font-bold text-gray-400 uppercase tracking-[0.2em] leading-none">
                 {fabric.supplier}
               </p>
               
-              {/* Footer: Colors count or list */}
-              <p className="text-[9px] text-gray-300 font-normal uppercase leading-snug px-1 tracking-wide line-clamp-1 mt-2">
-                {colorList.length > 0 ? `${colorList.length} Colores` : 'Sin Variantes'}
+              {/* Footer: List of available colors (Light Grey) */}
+              <p className="text-[9px] text-gray-400 font-normal uppercase leading-snug px-1 tracking-wide line-clamp-1 mt-2">
+                {colorList.length > 0 ? colorList.join(', ') : 'Sin Variantes'}
               </p>
             </>
           ) : (
@@ -98,10 +98,6 @@ const FabricCard: React.FC<FabricCardProps> = ({ fabric, onClick, mode, specific
               {/* Subtitle: MODEL NAME (Uppercase to act as "Collection Name") */}
               <p className="text-[10px] md:text-xs font-bold text-gray-400 uppercase tracking-[0.2em] leading-none">
                 {fabric.name}
-              </p>
-               {/* Tiny Supplier below */}
-               <p className="text-[9px] text-gray-300 font-semibold uppercase tracking-widest leading-none mt-1 opacity-60">
-                {fabric.supplier}
               </p>
             </>
           )}

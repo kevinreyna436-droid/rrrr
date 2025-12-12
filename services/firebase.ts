@@ -7,6 +7,8 @@ import {
 import { getStorage, ref, uploadString, getDownloadURL, deleteObject } from "firebase/storage";
 import { Fabric } from "../types";
 
+// --- CONFIGURACIÓN DE FIREBASE ---
+// Credenciales actualizadas para el proyecto 'telas' (ID: proyecto-1-23086)
 const firebaseConfig = {
   apiKey: "AIzaSyCzdQwkC--MboeRXeq8DjzyJkIfZoITKro",
   authDomain: "proyecto-1-23086.firebaseapp.com",
@@ -54,18 +56,26 @@ const uploadImage = async (path: string, base64Data: string): Promise<string> =>
         console.log(`✅ IMAGEN SUBIDA: ${path}`);
         return url;
     } catch (e: any) {
+        console.error(`❌ Error subiendo imagen a Storage (${path}):`, e.code, e.message);
+
         if (e.code === 'storage/unauthorized') {
-            console.error("⛔ ERROR DE PERMISOS: No puedes subir archivos. Revisa 'storage.rules' en Firebase.");
             throw new Error("PERMISSION_DENIED_STORAGE");
-        } else {
-            console.warn(`⚠️ Subida fallida (¿Offline?): ${path}. Se guardará localmente hasta tener conexión.`);
-            // Return base64 to save locally so user doesn't lose image
-            if (base64Data.length > 2000000) {
-                console.warn("⚠️ Imagen muy grande para modo offline. Se omitirá para evitar bloquear la app.");
-                return ""; 
-            }
-            return base64Data;
+        } else if (e.code === 'storage/retry-limit-exceeded' || e.code === 'storage/canceled') {
+            throw new Error("NETWORK_ERROR_STORAGE");
         }
+
+        // CRITICAL CHECK:
+        // If Storage fails, we might try to save Base64 to Firestore.
+        // But Firestore has a 1MB limit per document.
+        // If the image is large (> 500KB approx to be safe along with other data), 
+        // saving to Firestore WILL FAIL and crash the operation.
+        if (base64Data.length > 500000) { 
+            console.error("⚠️ La imagen es demasiado grande para guardar localmente sin Storage.");
+            throw new Error("STORAGE_FAILED_IMAGE_TOO_LARGE");
+        }
+
+        console.warn(`⚠️ Subida fallida (¿Offline?): ${path}. Se intentará guardar localmente (Baja resolución).`);
+        return base64Data;
     }
 };
 
@@ -92,9 +102,8 @@ const timeoutPromise = (ms: number, promise: Promise<any>) => {
 
 export const getFabricsFromFirestore = async (): Promise<Fabric[]> => {
   try {
-    // Race: If DB takes more than 3000ms, fail fast so we show demo data
-    // This solves "white screen" on slow connections
-    const querySnapshot: any = await timeoutPromise(3000, getDocs(collection(db, "fabrics")));
+    // Increased timeout to 8000ms (8s) to prevent false positives on slow mobile connections
+    const querySnapshot: any = await timeoutPromise(8000, getDocs(collection(db, "fabrics")));
     
     const data = querySnapshot.docs.map((doc: any) => doc.data() as Fabric);
     console.log(`✅ CONEXIÓN EXITOSA: Se cargaron ${data.length} telas de la nube.`);
@@ -159,6 +168,13 @@ export const saveFabricToFirestore = async (fabric: Fabric): Promise<void> => {
       if (e.message === "PERMISSION_DENIED_STORAGE") {
           throw new Error("PERMISSION_DENIED_STORAGE");
       }
+      if (e.message === "STORAGE_FAILED_IMAGE_TOO_LARGE") {
+          throw new Error("STORAGE_FAILED_IMAGE_TOO_LARGE");
+      }
+      // Firestore document size limit error usually looks like this
+      if (e.code === 'resource-exhausted' || e.message.includes('exceeds the maximum size')) {
+           throw new Error("DOC_TOO_LARGE");
+      }
       throw e;
   }
 };
@@ -210,7 +226,7 @@ export const testStorageConnection = async (): Promise<{success: boolean; messag
     try {
         // Race condition check: fast timeout for diagnostics
         const testRef = ref(storage, 'diagnostics/test_connection.txt');
-        await timeoutPromise(2000, uploadString(testRef, 'test_ping', 'raw'));
+        await timeoutPromise(3000, uploadString(testRef, 'test_ping', 'raw'));
         await deleteObject(testRef);
         return { success: true, message: "Conectado a la Nube correctamente." };
     } catch (e: any) {
@@ -222,6 +238,10 @@ export const testStorageConnection = async (): Promise<{success: boolean; messag
         }
         if (e.code === 'unavailable') {
             return { success: false, message: "Modo Offline (Sin Internet) - Tus datos se guardarán localmente." };
+        }
+        // Generic 404 on project bucket often means config is wrong
+        if (e.code === 'storage/object-not-found' || e.code === 'storage/bucket-not-found') {
+             return { success: false, message: "ERROR CONFIG: No se encuentra el Bucket de Storage. Revisa firebaseConfig." };
         }
         return { success: false, message: "Aviso de conexión: " + e.message };
     }
