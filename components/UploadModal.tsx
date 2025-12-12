@@ -286,8 +286,6 @@ const UploadModal: React.FC<UploadModalProps> = ({ isOpen, onClose, onSave, onBu
         // Skip groups with no valid media
         if (!groupFiles.some(f => f.type.startsWith('image/') || f.type === 'application/pdf')) continue;
         
-        // REMOVED BLOCKING DUPLICATE CHECK
-        
         // Notify user about the safety pause
         setCurrentProgress(`Pausando 15s para proteger límite API...`);
         // THROTTLE: Increase delay to 15 seconds per folder group.
@@ -299,13 +297,10 @@ const UploadModal: React.FC<UploadModalProps> = ({ isOpen, onClose, onSave, onBu
             const fabricNameHint = key === 'Lote Cargado' ? 'Unknown' : key;
             const fabricData = await analyzeFileGroup(groupFiles, fabricNameHint);
 
-            // Validation rules removed.
-            
             // Check for duplicates just for alerting, BUT DO NOT SKIP
             const extractedNameClean = (fabricData.name || '').toLowerCase().trim();
             if (extractedNameClean && extractedNameClean !== 'unknown' && existingNamesNormalized.includes(extractedNameClean)) {
                  duplicatesFound.push(fabricData.name || "Sin Nombre");
-                 // REMOVED 'continue' to allow re-uploading deleted items
             }
 
             results.push(fabricData);
@@ -368,7 +363,6 @@ const UploadModal: React.FC<UploadModalProps> = ({ isOpen, onClose, onSave, onBu
         }
         
         setTimeout(() => {
-            // Release memory immediately
             setFiles([]);
             setExtractedFabrics([]);
             setStep('upload');
@@ -377,6 +371,21 @@ const UploadModal: React.FC<UploadModalProps> = ({ isOpen, onClose, onSave, onBu
 
     } catch (error: any) {
         console.error("Save error:", error);
+        
+        let msg = "Error guardando los productos.";
+        if (error.message === "PERMISSION_DENIED_STORAGE") {
+            msg = "ERROR DE PERMISOS EN STORAGE: No tienes permiso para subir fotos. Debes configurar las reglas en Firebase Console (Storage).";
+            alert(msg);
+        } else if (error.message === "PERMISSION_DENIED_DB") {
+            msg = "ERROR DE PERMISOS EN BASE DE DATOS: No tienes permiso para guardar datos. Configura las reglas en Firebase Console (Firestore).";
+            alert(msg);
+        } else if (error.message?.includes("quota")) {
+            msg = "Error de cuota excedida en Firebase.";
+        } else if (error.code === 'resource-exhausted') {
+            msg = "Error: El archivo es demasiado grande para la base de datos y no se pudo subir a Storage.";
+        }
+        
+        // Don't close modal on error so they can retry
     } finally {
         setIsSaving(false);
     }
@@ -459,7 +468,7 @@ const UploadModal: React.FC<UploadModalProps> = ({ isOpen, onClose, onSave, onBu
                         </label>
 
                         <label className="border-2 border-dashed border-blue-200 bg-blue-50/30 rounded-2xl p-6 flex flex-col items-center justify-center cursor-pointer hover:bg-blue-50 transition-colors h-48 text-center relative group">
-                            <svg className="w-10 h-10 text-blue-500 mb-3 group-hover:scale-110 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
+                            <svg className="w-10 h-10 text-blue-500 mb-3 group-hover:scale-110 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
                             <span className="font-bold text-blue-800">Fotos / Drive (Móvil)</span>
                             <p className="text-xs text-blue-600 mt-1">Selecciona fotos sueltas de la galería o Drive.</p>
                             <input 

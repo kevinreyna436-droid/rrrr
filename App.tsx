@@ -32,7 +32,9 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<'model' | 'color' | 'wood'>('model');
   const [loading, setLoading] = useState(true);
   const [offlineStatus, setOfflineStatus] = useState(false);
-  const [diagnosticResult, setDiagnosticResult] = useState<{success: boolean; message: string} | null>(null);
+  
+  // Toast Notification State
+  const [toast, setToast] = useState<{message: string, type: 'success' | 'error' | 'info'} | null>(null);
   
   // Sorting State - Default "color"
   const [sortBy, setSortBy] = useState<SortOption>('color');
@@ -45,6 +47,11 @@ export default function App() {
     fabricId: string;
     colorName: string;
   } | null>(null);
+
+  const showToast = (message: string, type: 'success' | 'error' | 'info' = 'info') => {
+      setToast({ message, type });
+      setTimeout(() => setToast(null), 4000);
+  };
 
   const loadData = async () => {
     setLoading(true);
@@ -82,12 +89,15 @@ export default function App() {
           if (found) {
               setSelectedFabricId(linkedId);
               setView('detail');
+          } else if (loadedFabrics.length > 0) {
+              showToast("La ficha del enlace no existe o fue eliminada.", 'error');
           }
       }
 
     } catch (e: any) {
       console.error("Error loading data", e?.message || "Unknown error");
-      setFabrics([]); // Start empty on error
+      showToast("Error conectando a la base de datos.", 'error');
+      setFabrics([]); 
     } finally {
       setLoading(false);
     }
@@ -95,7 +105,21 @@ export default function App() {
 
   // Run diagnostic on mount & Handle Browser Back Button
   useEffect(() => {
-    loadData();
+    // Initial Load Sequence
+    const init = async () => {
+        await loadData();
+        
+        // AUTO-DIAGNOSTIC: Check permissions immediately on load
+        // This ensures the user knows right away if the console rules are working
+        const diag = await testStorageConnection();
+        if (!diag.success) {
+            // Only annoy the user if there is an error
+            showToast(diag.message, 'error');
+        } else {
+            console.log("✅ Conexión a Storage verificada correctamente.");
+        }
+    };
+    init();
     
     // Offline/Online listeners
     window.addEventListener('online', () => setOfflineStatus(false));
@@ -129,9 +153,10 @@ export default function App() {
           setOfflineStatus(false);
           await loadData();
           const result = await testStorageConnection();
-          setDiagnosticResult(result);
+          if (!result.success) showToast(result.message, 'error');
+          else showToast("Conexión restablecida", 'success');
       } else {
-          alert("No se pudo conectar. Seguimos en modo offline.");
+          showToast("No se pudo conectar. Seguimos en modo offline.", 'error');
       }
       setLoading(false);
   };
@@ -140,8 +165,9 @@ export default function App() {
       setLoading(true);
       await loadData();
       const result = await testStorageConnection();
+      if (!result.success) showToast(result.message, 'error');
+      else showToast("Sincronizado con la nube", 'success');
       setLoading(false);
-      setDiagnosticResult(result);
   };
 
   const handleUploadClick = () => {
@@ -185,12 +211,14 @@ export default function App() {
 
   const handleSaveFabric = async (newFabric: Fabric) => {
     try {
-      // Optimistic Update: Allow Duplicates (user can handle them manually if needed)
+      // Optimistic Update
       setFabrics(prev => [newFabric, ...prev]);
       await saveFabricToFirestore(newFabric);
       setOfflineStatus(isOfflineMode()); 
+      showToast("Ficha guardada en la nube correctamente.", 'success');
     } catch (e: any) {
       console.error("Error saving fabric:", e?.message || "Unknown error");
+      showToast("Error al guardar en la nube. Revisa permisos.", 'error');
     }
   };
 
@@ -199,8 +227,10 @@ export default function App() {
       await saveBatchFabricsToFirestore(newFabrics, onProgress);
       await loadData();
       setOfflineStatus(isOfflineMode()); 
+      showToast(`${newFabrics.length} fichas guardadas correctamente.`, 'success');
     } catch (e: any) {
       console.error("Error bulk saving:", e?.message || "Unknown error");
+      showToast("Error en carga masiva. Revisa tu conexión.", 'error');
       await loadData();
     }
   };
@@ -210,8 +240,10 @@ export default function App() {
       setFabrics(prev => prev.map(f => f.id === updatedFabric.id ? updatedFabric : f));
       await saveFabricToFirestore(updatedFabric);
       setOfflineStatus(isOfflineMode()); 
+      showToast("Cambios guardados exitosamente.", 'success');
     } catch (e: any) {
       console.error("Error updating fabric:", e?.message || "Unknown error");
+      showToast("Error al actualizar. Intenta de nuevo.", 'error');
     }
   };
 
@@ -221,9 +253,10 @@ export default function App() {
           handleBackToGrid(); // Clear view and URL
           await deleteFabricFromFirestore(fabricId);
           setOfflineStatus(isOfflineMode()); 
+          showToast("Ficha eliminada de la nube.", 'success');
       } catch (e: any) {
           console.error("Error deleting fabric:", e?.message || "Unknown error");
-          alert("Hubo un error al eliminar la ficha.");
+          showToast("Error al eliminar la ficha.", 'error');
       }
   };
 
@@ -234,11 +267,11 @@ export default function App() {
             await clearFirestoreCollection();
             setUploadModalOpen(false);
             setOfflineStatus(false); 
-            alert("Catálogo reseteado correctamente.");
-            window.location.reload();
+            showToast("Base de datos reseteada por completo.", 'success');
+            setTimeout(() => window.location.reload(), 1500);
           } catch (e: any) {
             console.error("Error resetting collection:", e?.message || "Unknown error");
-            alert("Error al resetear la base de datos.");
+            showToast("Error al resetear la base de datos.", 'error');
           }
       }
   };
@@ -429,17 +462,20 @@ export default function App() {
   return (
     <div className="min-h-screen bg-[rgb(241,242,244)] text-primary font-sans selection:bg-black selection:text-white relative">
       
-      {/* Diagnostic Toast */}
-      {diagnosticResult && (
+      {/* Toast Notification */}
+      {toast && (
          <div 
-            className={`fixed top-16 left-1/2 transform -translate-x-1/2 z-[200] px-6 py-3 rounded-full shadow-lg border flex items-center space-x-3 transition-all animate-fade-in-down cursor-pointer
-                ${diagnosticResult.success ? 'bg-green-100 border-green-200 text-green-800' : 'bg-red-100 border-red-200 text-red-800'}
+            className={`fixed top-4 left-1/2 transform -translate-x-1/2 z-[200] px-6 py-4 rounded-xl shadow-2xl border flex items-center space-x-3 transition-all animate-fade-in-down cursor-pointer min-w-[300px] justify-center
+                ${toast.type === 'success' ? 'bg-black text-white border-gray-800' : 
+                  toast.type === 'error' ? 'bg-red-500 text-white border-red-600' : 
+                  'bg-white text-black border-gray-200'}
             `}
-            onClick={() => setDiagnosticResult(null)}
+            onClick={() => setToast(null)}
          >
-            <div className={`w-3 h-3 rounded-full ${diagnosticResult.success ? 'bg-green-500' : 'bg-red-500'}`}></div>
-            <span className="text-xs font-bold">{diagnosticResult.message}</span>
-            <span className="text-[10px] opacity-60 ml-2">(Click para cerrar)</span>
+            {toast.type === 'success' && <svg className="w-5 h-5 text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>}
+            {toast.type === 'error' && <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>}
+            
+            <span className="text-sm font-bold">{toast.message}</span>
          </div>
       )}
 

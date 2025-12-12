@@ -39,7 +39,8 @@ try {
 
 /**
  * Uploads a base64 image string to Firebase Storage and returns the download URL.
- * If upload fails (e.g. offline), returns the original base64 to keep the app working.
+ * CRITICAL FIX: If upload fails due to permission, THROW error instead of returning huge base64
+ * to prevent Firestore document size limit errors.
  */
 const uploadImage = async (path: string, base64Data: string): Promise<string> => {
     // If it's already a URL or empty, return as is
@@ -56,11 +57,19 @@ const uploadImage = async (path: string, base64Data: string): Promise<string> =>
         return url;
     } catch (e: any) {
         if (e.code === 'storage/unauthorized') {
-            console.error("⛔ PERMISO DENEGADO EN STORAGE. Revisa las reglas en Firebase Console.");
+            console.error("⛔ PERMISO DENEGADO EN STORAGE.");
+            // We throw a specific error so the UI knows permissions are wrong
+            throw new Error("PERMISSION_DENIED_STORAGE");
         } else {
             console.warn(`Upload failed for ${path} (Offline?), saving Base64 to DB directly.`, e.message);
+            // Only return base64 if it's NOT a permission error (e.g. offline)
+            // But warn if it's too big
+            if (base64Data.length > 1000000) {
+                console.warn("Image too large for offline storage, skipping image to save text data.");
+                return ""; // Skip image to save the rest of data
+            }
+            return base64Data;
         }
-        return base64Data;
     }
 };
 
@@ -74,8 +83,7 @@ export const getFabricsFromFirestore = async (): Promise<Fabric[]> => {
     return data;
   } catch (e: any) {
     if (e.code === 'permission-denied') {
-        console.error("⛔ PERMISO DENEGADO EN FIRESTORE. Revisa las reglas en Firebase Console.");
-        alert("Error de Permisos: No se pueden leer las telas. Configura las reglas en Firebase.");
+        console.error("⛔ PERMISO DENEGADO EN FIRESTORE.");
     } else {
         console.error("Error reading fabrics:", e.message);
     }
@@ -124,8 +132,10 @@ export const saveFabricToFirestore = async (fabric: Fabric): Promise<void> => {
 
   } catch (e: any) {
       if (e.code === 'permission-denied') {
-          console.error("⛔ PERMISO DENEGADO AL GUARDAR. Revisa Firestore Rules.");
-          alert("No tienes permiso para guardar cambios en la nube.");
+          throw new Error("PERMISSION_DENIED_DB");
+      }
+      if (e.message === "PERMISSION_DENIED_STORAGE") {
+          throw new Error("PERMISSION_DENIED_STORAGE");
       }
       throw e;
   }
@@ -142,8 +152,6 @@ export const saveBatchFabricsToFirestore = async (fabrics: Fabric[], onProgress?
 export const deleteFabricFromFirestore = async (id: string): Promise<void> => {
     try {
         await deleteDoc(doc(db, "fabrics", id));
-        // Note: To delete files from Storage, usually a Cloud Function is better suited 
-        // to clean up the folder 'fabrics/{id}/'. Doing it client-side requires listing files which is permission-heavy.
     } catch (e: any) {
         console.error("Error deleting fabric:", e.message);
         throw e;
@@ -182,31 +190,8 @@ export const testStorageConnection = async (): Promise<{success: boolean; messag
         return { success: true, message: "Conectado a Firebase (Storage y Firestore) correctamente." };
     } catch (e: any) {
         if (e.code === 'storage/unauthorized') {
-             return { success: false, message: "Error de Permisos (Rules). Copia las reglas del chat a tu consola." };
+             return { success: false, message: "Error Permisos Storage: Configura las reglas en Firebase Console." };
         }
         return { success: false, message: "Error de conexión: " + e.message };
-    }
-};
-
-export const getSystemHealth = async () => {
-    const start = Date.now();
-    try {
-        await getDocs(collection(db, "fabrics"));
-        const latency = Date.now() - start;
-        return { 
-            dbStatus: true, 
-            storageStatus: true, 
-            latency,
-            dbMessage: "Online",
-            storageMessage: "Online"
-        };
-    } catch (e) {
-         return { 
-            dbStatus: false, 
-            storageStatus: false, 
-            latency: 0,
-            dbMessage: "Error / Offline",
-            storageMessage: "Error"
-        };
     }
 };

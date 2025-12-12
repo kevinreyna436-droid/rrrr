@@ -1,6 +1,6 @@
 {
-  "name": "buena 123",
-  "description": "A premium minimalist fabric catalog powered by Gemini AI for automated ingestion and design.",
+  "name": "Creata Collection",
+  "description": "Catálogo digital exclusivo de textiles y maderas. Gestión de inventario y diseño con IA.",
   "requestFramePermissions": [
     "camera",
     "microphone"

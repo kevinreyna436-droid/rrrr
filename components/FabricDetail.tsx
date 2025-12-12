@@ -66,6 +66,24 @@ const FabricDetail: React.FC<FabricDetailProps> = ({ fabric, onBack, onEdit, onD
       setPinModalOpen(true);
   };
 
+  const handleShare = async () => {
+      const url = window.location.href;
+      try {
+          if (navigator.share) {
+              await navigator.share({
+                  title: `Creata: ${fabric.name}`,
+                  text: `Mira este diseño: ${fabric.name} - ${fabric.supplier}`,
+                  url: url
+              });
+          } else {
+              await navigator.clipboard.writeText(url);
+              alert("Enlace copiado al portapapeles: " + url);
+          }
+      } catch (e) {
+          console.log("Error sharing", e);
+      }
+  };
+
   const handleDownloadFicha = (e: React.MouseEvent) => {
       if (fabric.pdfUrl) return; // If real URL exists, let default behavior happen
       
@@ -241,16 +259,24 @@ Generado automáticamente por Creata App
       )}
 
       {/* Navigation Header */}
-      <div className="sticky top-0 z-40 bg-[#f2f2f2]/90 backdrop-blur-sm px-6 py-3 flex items-center justify-center border-b border-gray-200/50">
-        <div className="absolute left-6">
+      <div className="sticky top-0 z-40 bg-[#f2f2f2]/90 backdrop-blur-sm px-6 py-3 flex items-center justify-between border-b border-gray-200/50">
+        <div>
             <button onClick={onBack} className="flex items-center text-gray-400 hover:text-black transition-colors text-lg font-medium uppercase tracking-wide">
-            <svg className="w-6 h-6" mr-2 fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M10 19l-7-7m0 0l7-7m-7 7h18" /></svg>
+            <svg className="w-6 h-6 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M10 19l-7-7m0 0l7-7m-7 7h18" /></svg>
             Volver
             </button>
         </div>
         
         {/* Right side controls */}
-        <div className="absolute right-6 flex items-center space-x-4">
+        <div className="flex items-center space-x-4">
+            <button
+                onClick={handleShare}
+                className="text-gray-400 hover:text-black transition-colors"
+                title="Compartir enlace de esta tela"
+            >
+                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z" /></svg>
+            </button>
+            
             <button 
                 onClick={handleEditClick} 
                 className="text-gray-400 hover:text-black transition-colors font-bold text-3xl pb-4 h-8 flex items-center"
