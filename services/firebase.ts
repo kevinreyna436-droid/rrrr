@@ -22,13 +22,13 @@ const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
 const storage = getStorage(app);
 
-// Enable Offline Persistence
+// Enable Offline Persistence with Better Error Handling
 try {
     enableIndexedDbPersistence(db).catch((err) => {
         if (err.code === 'failed-precondition') {
-            console.warn("Persistencia falló: Multiples pestañas abiertas.");
+            console.warn("⚠️ AVISO: Tienes la app abierta en varias pestañas. La persistencia offline solo funciona en una a la vez.");
         } else if (err.code === 'unimplemented') {
-            console.warn("El navegador no soporta persistencia.");
+            console.warn("⚠️ AVISO: Tu navegador no soporta el modo offline avanzado.");
         }
     });
 } catch (e) {
@@ -39,8 +39,6 @@ try {
 
 /**
  * Uploads a base64 image string to Firebase Storage and returns the download URL.
- * CRITICAL FIX: If upload fails due to permission, THROW error instead of returning huge base64
- * to prevent Firestore document size limit errors.
  */
 const uploadImage = async (path: string, base64Data: string): Promise<string> => {
     // If it's already a URL or empty, return as is
@@ -53,20 +51,18 @@ const uploadImage = async (path: string, base64Data: string): Promise<string> =>
         const storageRef = ref(storage, path);
         await uploadString(storageRef, base64Data, 'data_url');
         const url = await getDownloadURL(storageRef);
-        console.log(`✅ Imagen subida a Nube: ${path}`);
+        console.log(`✅ IMAGEN SUBIDA: ${path}`);
         return url;
     } catch (e: any) {
         if (e.code === 'storage/unauthorized') {
-            console.error("⛔ PERMISO DENEGADO EN STORAGE.");
-            // We throw a specific error so the UI knows permissions are wrong
+            console.error("⛔ ERROR DE PERMISOS: No puedes subir archivos. Revisa 'storage.rules' en Firebase.");
             throw new Error("PERMISSION_DENIED_STORAGE");
         } else {
-            console.warn(`Upload failed for ${path} (Offline?), saving Base64 to DB directly.`, e.message);
-            // Only return base64 if it's NOT a permission error (e.g. offline)
-            // But warn if it's too big
-            if (base64Data.length > 1000000) {
-                console.warn("Image too large for offline storage, skipping image to save text data.");
-                return ""; // Skip image to save the rest of data
+            console.warn(`⚠️ Subida fallida (¿Offline?): ${path}. Se guardará localmente hasta tener conexión.`);
+            // Return base64 to save locally so user doesn't lose image
+            if (base64Data.length > 2000000) {
+                console.warn("⚠️ Imagen muy grande para modo offline. Se omitirá para evitar bloquear la app.");
+                return ""; 
             }
             return base64Data;
         }
@@ -75,17 +71,43 @@ const uploadImage = async (path: string, base64Data: string): Promise<string> =>
 
 // --- Firestore Operations ---
 
+// Utility to race a promise against a timeout
+const timeoutPromise = (ms: number, promise: Promise<any>) => {
+  return new Promise((resolve, reject) => {
+    const timeoutId = setTimeout(() => {
+      reject(new Error("TIMEOUT"));
+    }, ms);
+    promise.then(
+      (res) => {
+        clearTimeout(timeoutId);
+        resolve(res);
+      },
+      (err) => {
+        clearTimeout(timeoutId);
+        reject(err);
+      }
+    );
+  });
+};
+
 export const getFabricsFromFirestore = async (): Promise<Fabric[]> => {
   try {
-    const querySnapshot = await getDocs(collection(db, "fabrics"));
-    const data = querySnapshot.docs.map(doc => doc.data() as Fabric);
-    console.log(`✅ Leídas ${data.length} telas de la base de datos.`);
+    // Race: If DB takes more than 3000ms, fail fast so we show demo data
+    // This solves "white screen" on slow connections
+    const querySnapshot: any = await timeoutPromise(3000, getDocs(collection(db, "fabrics")));
+    
+    const data = querySnapshot.docs.map((doc: any) => doc.data() as Fabric);
+    console.log(`✅ CONEXIÓN EXITOSA: Se cargaron ${data.length} telas de la nube.`);
     return data;
   } catch (e: any) {
-    if (e.code === 'permission-denied') {
-        console.error("⛔ PERMISO DENEGADO EN FIRESTORE.");
+    if (e.message === "TIMEOUT") {
+        console.warn("⚠️ Conexión lenta: Mostrando modo demo/offline temporalmente.");
+    } else if (e.code === 'permission-denied') {
+        console.error("⛔ ERROR DE PERMISOS: No puedes leer la base de datos.");
+    } else if (e.code === 'unavailable') {
+        console.log("⚠️ MODO OFFLINE: Cargando datos guardados en el dispositivo...");
     } else {
-        console.error("Error reading fabrics:", e.message);
+        console.error("Error leyendo telas:", e.message);
     }
     return [];
   }
@@ -128,7 +150,7 @@ export const saveFabricToFirestore = async (fabric: Fabric): Promise<void> => {
 
     // 4. Save metadata to Firestore
     await setDoc(doc(db, "fabrics", fabric.id), updatedFabric);
-    console.log(`✅ Ficha guardada en Firestore: ${fabric.name}`);
+    console.log(`✅ GUARDADO EXITOSO: ${fabric.name}`);
 
   } catch (e: any) {
       if (e.code === 'permission-denied') {
@@ -152,8 +174,9 @@ export const saveBatchFabricsToFirestore = async (fabrics: Fabric[], onProgress?
 export const deleteFabricFromFirestore = async (id: string): Promise<void> => {
     try {
         await deleteDoc(doc(db, "fabrics", id));
+        console.log(`🗑️ Tela eliminada: ${id}`);
     } catch (e: any) {
-        console.error("Error deleting fabric:", e.message);
+        console.error("Error eliminando tela:", e.message);
         throw e;
     }
 };
@@ -166,8 +189,9 @@ export const clearFirestoreCollection = async (): Promise<void> => {
             batch.delete(doc.ref);
         });
         await batch.commit();
+        console.log("⚠️ BASE DE DATOS RESETEADA");
     } catch (e: any) {
-        console.error("Error clearing collection:", e.message);
+        console.error("Error reseteando colección:", e.message);
         throw e;
     }
 };
@@ -184,14 +208,21 @@ export const retryFirebaseConnection = async (): Promise<boolean> => {
 
 export const testStorageConnection = async (): Promise<{success: boolean; message: string}> => {
     try {
+        // Race condition check: fast timeout for diagnostics
         const testRef = ref(storage, 'diagnostics/test_connection.txt');
-        await uploadString(testRef, 'test_ping', 'raw');
+        await timeoutPromise(2000, uploadString(testRef, 'test_ping', 'raw'));
         await deleteObject(testRef);
-        return { success: true, message: "Conectado a Firebase (Storage y Firestore) correctamente." };
+        return { success: true, message: "Conectado a la Nube correctamente." };
     } catch (e: any) {
-        if (e.code === 'storage/unauthorized') {
-             return { success: false, message: "Error Permisos Storage: Configura las reglas en Firebase Console." };
+        if (e.message === 'TIMEOUT') {
+             return { success: false, message: "Conexión lenta: Modo Offline activo." };
         }
-        return { success: false, message: "Error de conexión: " + e.message };
+        if (e.code === 'storage/unauthorized') {
+             return { success: false, message: "ERROR CRÍTICO: Permisos denegados en la base de datos." };
+        }
+        if (e.code === 'unavailable') {
+            return { success: false, message: "Modo Offline (Sin Internet) - Tus datos se guardarán localmente." };
+        }
+        return { success: false, message: "Aviso de conexión: " + e.message };
     }
 };

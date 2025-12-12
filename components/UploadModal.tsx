@@ -351,7 +351,8 @@ const UploadModal: React.FC<UploadModalProps> = ({ isOpen, onClose, onSave, onBu
             mainImage: data.mainImage || '',
             category: selectedCategory,
             customCatalog: data.customCatalog, 
-            pdfUrl: data.pdfUrl
+            pdfUrl: data.pdfUrl,
+            createdAt: Date.now() // Add timestamp for sorting
         }));
 
         if (finalFabrics.length === 1) {

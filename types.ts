@@ -23,6 +23,7 @@ export interface Fabric {
   specsImage?: string; // New: Image representation of the tech sheet
   category: 'model' | 'wood';
   customCatalog?: string; // New: Manual catalog name
+  createdAt?: number; // Timestamp for sorting
 }
 
 export interface ChatMessage {
