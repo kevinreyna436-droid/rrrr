@@ -363,16 +363,6 @@ export default function App() {
       )}
 
       <div className="fixed top-4 right-4 z-50 flex items-center gap-4">
-          {offlineStatus ? (
-             <div className="flex items-center space-x-2 bg-red-100 text-red-600 px-3 py-1 rounded-full border border-red-200 shadow-sm animate-pulse cursor-pointer" onClick={handleRetryConnection}>
-                <div className="w-2 h-2 rounded-full bg-red-500"></div><span className="text-[10px] font-bold uppercase tracking-wide">Offline</span>
-             </div>
-         ) : (
-            <div onClick={handleCloudRefresh} className="flex items-center space-x-2 bg-white/50 backdrop-blur-md px-3 py-1 rounded-full border border-gray-200 shadow-sm cursor-pointer hover:bg-white transition-all">
-                 <div className={`w-2 h-2 rounded-full ${isDemoMode ? 'bg-yellow-500' : 'bg-green-500'}`}></div>
-                 <span className="text-[10px] font-bold uppercase tracking-wide text-gray-500">{loading ? 'Cargando...' : (isDemoMode ? 'Modo Demo' : 'En Línea')}</span>
-            </div>
-         )}
           <button onClick={handleUploadClick} className="text-gray-300 hover:text-black font-bold text-2xl w-8 h-8 flex items-center justify-center rounded-full hover:bg-white transition-colors">.</button>
       </div>
 
