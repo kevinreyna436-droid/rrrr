@@ -31,13 +31,13 @@ const FabricCard: React.FC<FabricCardProps> = ({ fabric, onClick, mode, specific
       onClick={onClick}
       className="group relative w-full aspect-[3/4] md:aspect-[4/5] bg-white rounded-3xl shadow-sm hover:shadow-2xl transition-all duration-500 overflow-hidden cursor-pointer flex flex-col hover:-translate-y-2 hover:scale-[0.97] transform-gpu scale-[0.95]"
     >
-      {/* SECTION SUPERIOR (Imagen) - 70% height */}
-      <div className="relative h-[70%] w-full bg-gray-100 overflow-hidden">
+      {/* SECTION SUPERIOR (Imagen) - 75% height for more visual impact */}
+      <div className="relative h-[75%] w-full bg-gray-100 overflow-hidden">
         {displayImage ? (
           <img 
             src={displayImage} 
             alt={mode === 'model' ? fabric.name : `${fabric.name} - ${specificColorName}`} 
-            className="w-full h-full object-cover object-center transition-transform duration-700 scale-[1.1] group-hover:scale-[1.15]"
+            className="w-full h-full object-cover object-center transition-transform duration-700 scale-[1.05] group-hover:scale-[1.15]"
             loading="lazy"
           />
         ) : (
@@ -52,51 +52,37 @@ const FabricCard: React.FC<FabricCardProps> = ({ fabric, onClick, mode, specific
             </div>
           </div>
         )}
-        
-        {/* Curved Wave Separator (SVG) */}
-        <div className="absolute bottom-[-1px] left-0 w-full text-white pointer-events-none z-10">
-             <svg 
-               viewBox="0 0 1440 120" 
-               className="w-full h-auto block fill-current"
-               preserveAspectRatio="none"
-             >
-               <path d="M0,60 C480,130 960,130 1440,60 L1440,120 L0,120 Z" />
-             </svg>
-        </div>
       </div>
 
-      {/* SECTION INFERIOR (Información) - 30% height */}
-      <div className="h-[30%] px-4 pb-2 text-center flex flex-col items-center justify-start pt-3 bg-white relative z-20">
-        <div className="w-full flex flex-col justify-center h-full space-y-1">
+      {/* SECTION INFERIOR (Información) - 25% height */}
+      <div className="h-[25%] px-5 pb-4 text-center flex flex-col items-center justify-center bg-white relative z-20">
+        <div className="w-full flex flex-col items-center justify-center space-y-1">
           {mode === 'model' ? (
-            /* --- VISTA MODELOS --- */
-            /* Jerarquía: 1. Nombre Modelo (Title Case) / 2. Proveedor (UPPERCASE) / 3. Footer (Lista Colores) */
+            /* --- VISTA MODELOS (Grid General) --- */
+            /* Título: Nombre Modelo (Ej: Alanis) - Primera mayúscula */
+            /* Subtítulo: Proveedor (Ej: FORMATEX) - Todo mayúsculas, espaciado */
             <>
-              {/* Main Title: MODEL NAME */}
-              <h3 className="font-serif text-lg md:text-xl font-medium text-slate-800 leading-tight mb-1 group-hover:text-black transition-colors px-1 line-clamp-1">
+              <h3 className="font-serif text-2xl font-medium text-slate-900 leading-tight group-hover:text-black transition-colors">
                 {toTitleCase(fabric.name)}
               </h3>
-              {/* Subtitle: SUPPLIER (Uppercase for contrast, spaced) */}
-              <p className="text-[10px] md:text-xs font-bold text-gray-400 uppercase tracking-[0.2em] leading-none">
-                {fabric.supplier}
+              <p className="text-[10px] font-bold text-gray-400 uppercase tracking-[0.25em] leading-relaxed">
+                {fabric.supplier || 'CREATA'}
               </p>
               
-              {/* Footer: List of available colors (Light Grey) */}
-              <p className="text-[9px] text-gray-400 font-normal uppercase leading-snug px-1 tracking-wide line-clamp-1 mt-2">
-                {colorList.length > 0 ? colorList.join(', ') : 'Sin Variantes'}
+              {/* Footer opcional: Lista colores muy sutil */}
+              <p className="text-[9px] text-gray-300 font-medium uppercase tracking-wider mt-1 line-clamp-1">
+                {colorList.length > 0 ? `${colorList.length} Colores` : ''}
               </p>
             </>
           ) : (
-            /* --- VISTA COLORES --- */
-            /* Jerarquía: 1. Nombre Color (Title Case) / 2. Nombre Modelo (UPPERCASE) */
+            /* --- VISTA COLORES (Grid Colores) --- */
+            /* Título: Nombre Color (Ej: 05 Sand) - Primera mayúscula */
+            /* Subtítulo: Nombre Modelo (Ej: ALANIS) - Todo mayúsculas */
             <>
-              {/* Main Title: SPECIFIC COLOR NAME */}
-              <h3 className="font-serif text-lg md:text-xl font-medium text-slate-800 leading-tight mb-1 group-hover:text-black transition-colors px-1 line-clamp-2 break-words">
+              <h3 className="font-serif text-xl font-medium text-slate-900 leading-tight group-hover:text-black transition-colors line-clamp-1">
                 {specificColorName ? toTitleCase(specificColorName) : 'Sin Nombre'}
               </h3>
-              
-              {/* Subtitle: MODEL NAME (Uppercase to act as "Collection Name") */}
-              <p className="text-[10px] md:text-xs font-bold text-gray-400 uppercase tracking-[0.2em] leading-none">
+              <p className="text-[10px] font-bold text-gray-400 uppercase tracking-[0.25em] leading-relaxed">
                 {fabric.name}
               </p>
             </>

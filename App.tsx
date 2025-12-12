@@ -413,7 +413,10 @@ export default function App() {
             {!loading && filteredItemCount === 0 && (
                 <div className="text-center py-20 text-gray-300">
                      <p>El catálogo está vacío.</p>
-                     <div className="mt-4"><button onClick={handleUploadClick} className="bg-black text-white px-6 py-3 rounded-full text-sm font-bold uppercase tracking-wide hover:scale-105 transition-transform">Empezar a Cargar</button></div>
+                     <div className="mt-4 flex flex-col items-center gap-2">
+                        <button onClick={handleUploadClick} className="bg-black text-white px-6 py-3 rounded-full text-sm font-bold uppercase tracking-wide hover:scale-105 transition-transform">Empezar a Cargar</button>
+                        <button onClick={handleRetryConnection} className="text-xs text-gray-400 underline hover:text-black">Forzar Actualización</button>
+                     </div>
                 </div>
             )}
             

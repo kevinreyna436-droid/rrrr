@@ -8,7 +8,6 @@ import { getStorage, ref, uploadString, getDownloadURL } from "firebase/storage"
 import { Fabric } from "../types";
 
 // --- CONFIGURACIÓN DE FIREBASE ---
-// Asegúrate de que esta configuración sea válida y corresponda a tu proyecto real en la consola de Firebase.
 const firebaseConfig = {
   apiKey: "AIzaSyCzdQwkC--MboeRXeq8DjzyJkIfZoITKro",
   authDomain: "proyecto-1-23086.firebaseapp.com",
@@ -23,50 +22,53 @@ const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
 const storage = getStorage(app);
 
-// Habilitar persistencia offline (cache) para lectura rápida
+// Habilitar persistencia offline
 try { enableIndexedDbPersistence(db).catch(() => {}); } catch (e) {}
 
 // --- Helper Functions ---
 
 /**
- * Uploads a base64 string to Firebase Storage and returns the public URL.
- * If it's already a URL, returns it as is.
+ * Recursively removes keys with undefined values from an object.
+ * Firestore does not support 'undefined'.
  */
-const uploadImageToStorage = async (path: string, base64Data: string): Promise<string> => {
-    // 1. Si ya es una URL (http...), no hacer nada.
-    if (!base64Data || base64Data.startsWith('http')) return base64Data || '';
+const cleanDataForFirestore = (obj: any): any => {
+    if (obj === null || obj === undefined) return null;
     
-    // 2. Si no es una imagen válida, devolver vacío.
+    if (Array.isArray(obj)) {
+        return obj.map(v => cleanDataForFirestore(v)).filter(v => v !== undefined);
+    }
+    
+    if (typeof obj === 'object') {
+        const newObj: any = {};
+        Object.keys(obj).forEach(key => {
+            const value = cleanDataForFirestore(obj[key]);
+            if (value !== undefined) {
+                newObj[key] = value;
+            }
+        });
+        return newObj;
+    }
+    
+    return obj;
+};
+
+const uploadImageToStorage = async (path: string, base64Data: string): Promise<string> => {
+    if (!base64Data || base64Data.startsWith('http')) return base64Data || '';
     if (!base64Data.includes('data:image')) return '';
 
     try {
-        // Crear referencia en la nube
         const storageRef = ref(storage, path);
-        
-        // Subir
         await uploadString(storageRef, base64Data, 'data_url');
-        
-        // Obtener URL pública
         const url = await getDownloadURL(storageRef);
         return url;
     } catch (e: any) {
         console.error(`❌ Error subiendo imagen a ${path}:`, e);
-        // Si falla la subida de imagen, devolvemos string vacío para no romper la ficha completa
-        // El usuario verá la ficha sin foto, pero los datos estarán ahí.
         return ''; 
     }
 };
 
-/**
- * GUARDA UNA TELA EN LA NUBE (PROCESO ESTÁNDAR)
- * 1. Sube Foto Principal -> Obtiene URL
- * 2. Sube Fotos Colores -> Obtiene URLs
- * 3. Guarda JSON con URLs en Firestore
- */
 export const saveFabricToFirestore = async (fabric: Fabric): Promise<void> => {
   console.log(`☁️ Iniciando subida para: ${fabric.name}`);
-  
-  // Copia profunda para no mutar el objeto original mientras procesamos
   const finalFabric = { ...fabric };
 
   try {
@@ -82,28 +84,34 @@ export const saveFabricToFirestore = async (fabric: Fabric): Promise<void> => {
           finalFabric.specsImage = url;
       }
 
-      // 3. Subir Imágenes de Colores (Iterar y subir una por una)
+      // 3. Subir Imágenes de Colores
       if (finalFabric.colorImages) {
           const newColorImages: Record<string, string> = {};
           const entries = Object.entries(finalFabric.colorImages);
-          
           for (const [color, base64] of entries) {
              const safeColorName = color.replace(/[^a-z0-9]/gi, '_').toLowerCase();
              const url = await uploadImageToStorage(`fabrics/${fabric.id}/colors/${safeColorName}.jpg`, base64);
-             if (url) {
-                 newColorImages[color] = url;
-             }
+             if (url) newColorImages[color] = url;
           }
           finalFabric.colorImages = newColorImages;
       }
 
-      // 4. Guardar datos en Firestore (Ahora pesa muy poco porque son solo URLs)
-      await setDoc(doc(db, "fabrics", fabric.id), finalFabric);
+      // 4. Limpieza profunda de datos (CRÍTICO)
+      // Convertimos a JSON y volvemos para asegurar que no hay referencias raras, luego aplicamos limpieza
+      const rawData = JSON.parse(JSON.stringify(finalFabric));
+      const cleanData = cleanDataForFirestore(rawData);
+
+      // Asegurar campos obligatorios si se perdieron
+      if (!cleanData.colors) cleanData.colors = [];
+      if (!cleanData.colorImages) cleanData.colorImages = {};
+      if (!cleanData.specs) cleanData.specs = { composition: '', martindale: '', usage: '', weight: '' };
+
+      await setDoc(doc(db, "fabrics", fabric.id), cleanData);
       console.log("✅ Guardado Exitoso en Nube");
 
   } catch (e: any) {
       console.error("❌ Error Crítico guardando en Firestore:", e);
-      throw new Error("No se pudo guardar en la nube. Verifica tu conexión.");
+      throw new Error(`Error Firestore: ${e.message}`);
   }
 };
 
@@ -116,12 +124,13 @@ export const saveBatchFabricsToFirestore = async (fabrics: Fabric[], onProgress?
 
 export const getFabricsFromFirestore = async (): Promise<Fabric[]> => {
   try {
-    // Sin timeout agresivo. Dejamos que Firebase intente conectar.
     const querySnapshot = await getDocs(collection(db, "fabrics"));
-    return querySnapshot.docs.map((doc: any) => doc.data() as Fabric);
+    const data = querySnapshot.docs.map((doc: any) => doc.data() as Fabric);
+    console.log(`☁️ Descargados ${data.length} elementos de la nube.`);
+    return data;
   } catch (e) {
     console.error("Error obteniendo datos:", e);
-    throw e; // Lanzamos el error para que la UI sepa que falló la red
+    throw e;
   }
 };
 
