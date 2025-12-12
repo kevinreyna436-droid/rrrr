@@ -97,11 +97,10 @@ export const saveFabricToFirestore = async (fabric: Fabric): Promise<void> => {
       }
 
       // 4. Limpieza profunda de datos (CRÍTICO)
-      // Convertimos a JSON y volvemos para asegurar que no hay referencias raras, luego aplicamos limpieza
       const rawData = JSON.parse(JSON.stringify(finalFabric));
       const cleanData = cleanDataForFirestore(rawData);
 
-      // Asegurar campos obligatorios si se perdieron
+      // Asegurar campos obligatorios
       if (!cleanData.colors) cleanData.colors = [];
       if (!cleanData.colorImages) cleanData.colorImages = {};
       if (!cleanData.specs) cleanData.specs = { composition: '', martindale: '', usage: '', weight: '' };

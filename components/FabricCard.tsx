@@ -10,7 +10,7 @@ interface FabricCardProps {
   index: number;
 }
 
-// Helper to Capitalize First Letter (e.g. "alanis" -> "Alanis")
+// Helper to Capitalize First Letter (Title Case)
 const toTitleCase = (str: string) => {
   if (!str) return '';
   return str.toLowerCase().split(' ').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ');
@@ -59,29 +59,31 @@ const FabricCard: React.FC<FabricCardProps> = ({ fabric, onClick, mode, specific
         <div className="w-full flex flex-col items-center justify-center space-y-1">
           {mode === 'model' ? (
             /* --- VISTA MODELOS (Grid General) --- */
-            /* Título: Nombre Modelo (Ej: Alanis) - Primera mayúscula */
-            /* Subtítulo: Proveedor (Ej: FORMATEX) - Todo mayúsculas, espaciado */
             <>
+              {/* Título: Nombre Modelo (Ej: Alanis) - Primera mayúscula */}
               <h3 className="font-serif text-2xl font-medium text-slate-900 leading-tight group-hover:text-black transition-colors">
                 {toTitleCase(fabric.name)}
               </h3>
+              
+              {/* Subtítulo: Proveedor (Ej: FORMATEX) - Todo mayúsculas, espaciado */}
               <p className="text-[10px] font-bold text-gray-400 uppercase tracking-[0.25em] leading-relaxed">
                 {fabric.supplier || 'CREATA'}
               </p>
               
-              {/* Footer opcional: Lista colores muy sutil */}
-              <p className="text-[9px] text-gray-300 font-medium uppercase tracking-wider mt-1 line-clamp-1">
-                {colorList.length > 0 ? `${colorList.length} Colores` : ''}
+              {/* Pie: Lista de colores disponibles (texto gris claro) */}
+              <p className="text-[10px] text-gray-400 font-light mt-2 line-clamp-1 max-w-[95%] opacity-80 overflow-hidden text-ellipsis">
+                {colorList.length > 0 ? colorList.join(', ') : ''}
               </p>
             </>
           ) : (
             /* --- VISTA COLORES (Grid Colores) --- */
-            /* Título: Nombre Color (Ej: 05 Sand) - Primera mayúscula */
-            /* Subtítulo: Nombre Modelo (Ej: ALANIS) - Todo mayúsculas */
             <>
+              {/* Título: Nombre Color (Ej: 05 Sand) - Primera mayúscula */}
               <h3 className="font-serif text-xl font-medium text-slate-900 leading-tight group-hover:text-black transition-colors line-clamp-1">
                 {specificColorName ? toTitleCase(specificColorName) : 'Sin Nombre'}
               </h3>
+              
+              {/* Subtítulo: Nombre Modelo (Ej: ALANIS) - Todo mayúsculas */}
               <p className="text-[10px] font-bold text-gray-400 uppercase tracking-[0.25em] leading-relaxed">
                 {fabric.name}
               </p>
