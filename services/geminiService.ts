@@ -67,17 +67,21 @@ export const extractFabricData = async (base64Data: string, mimeType: string) =>
     You are a specialized data extractor for a textile catalog "Creata Collection".
     Analyze the provided document (PDF) or Image (Header Card).
 
-    YOUR GOAL: Identify the main FABRIC MODEL NAME and TECHNICAL SPECS.
+    YOUR GOAL: STRICTLY Identify the FABRIC MODEL NAME and TECHNICAL SPECIFICATIONS.
 
     CRITICAL RULES FOR "NAME":
-    1. **FIND THE HEADER:** The Fabric Name is usually the largest, boldest text at the top of the PDF page or card.
-    2. **IGNORE SUPPLIERS:** Do NOT use "Formatex", "Creata", "Textiles", "Home", "Decor" as the name. These are companies.
-    3. **IGNORE COLLECTIONS:** Do NOT use "New Collection", "Water Repellent", "Easy Clean" as the name. These are features.
-    4. **FORMAT:** Return ONLY the specific model name (e.g., "ALANIS", "BIKENDI", "SLATE"). Capitalize it.
+    1. **FIND THE HEADER:** The Fabric Name is usually the largest, boldest text.
+    2. **EXCLUSIONS:** Do NOT use "Formatex", "Creata", "Textiles", "Home", "Decor", "Collection" as the name.
+    3. **FORMAT:** Return ONLY the specific model name (e.g., "ALANIS", "BIKENDI"). Capitalize it.
+    4. If no specific model name is found, return "Unknown".
 
-    CRITICAL RULES FOR "SPECS":
-    1. Extract the technical details and translate them to SPANISH.
-    2. Look for "Composition", "Weight" (gr/m2), "Martindale" (cycles), and "Usage".
+    CRITICAL RULES FOR "SPECS" (MANDATORY):
+    1. You MUST find technical details: "Composition", "Weight" (Peso), "Martindale" (Abrasion), or "Usage".
+    2. Translate values to Spanish.
+    3. If the document DOES NOT contain technical specs, leave the specs fields empty. This is used to filter out invalid files.
+
+    CRITICAL RULES FOR "COLORS":
+    1. Scan the text for a list of colors if available.
 
     Return JSON strictly adhering to this schema.
     `;
@@ -95,9 +99,10 @@ export const extractFabricData = async (base64Data: string, mimeType: string) =>
         responseSchema: {
           type: Type.OBJECT,
           properties: {
-            name: { type: Type.STRING, description: "The specific model name (e.g. ALANIS). Not the company." },
+            name: { type: Type.STRING, description: "The specific model name (e.g. ALANIS). Return 'Unknown' if not found." },
             supplier: { type: Type.STRING, description: "The manufacturer name (e.g. Formatex)." },
             technicalSummary: { type: Type.STRING, description: "A summary in Spanish of the technical features." },
+            colors: { type: Type.ARRAY, items: { type: Type.STRING }, description: "List of color names found in the text." },
             specs: {
               type: Type.OBJECT,
               properties: {
@@ -117,9 +122,10 @@ export const extractFabricData = async (base64Data: string, mimeType: string) =>
     // Graceful fallback for Quota Exhausted or Extraction errors
     console.warn("AI Extraction skipped (Quota/Error). Using manual entry fallback.", error?.message);
     return {
-        name: "Revisar (Límite AI)", // Explicit name so user knows to edit it
+        name: "Unknown", 
         supplier: "Unknown",
-        technicalSummary: "Información pendiente de revisión manual.",
+        technicalSummary: "",
+        colors: [],
         specs: {}
     };
   }
@@ -133,17 +139,11 @@ export const extractColorFromSwatch = async (base64Data: string): Promise<string
     try {
         const prompt = `
         Analyze this fabric swatch image to find the COLOR NAME text label.
-
-        CRITICAL LOCATION RULE:
-        - The color name is almost ALWAYS located in the **BOTTOM RIGHT** corner of the physical label/card in the photo.
-        - Sometimes it might be in the bottom left.
         
         EXTRACTION RULES:
-        1. Look for a number followed by a name (e.g., "05 SAND", "102 ASH") or just a name (e.g. "NAVY").
+        1. Look for a number followed by a name (e.g., "05 SAND") or just a name.
         2. **IGNORE** company names (Formatex, Creata).
-        3. **IGNORE** website URLs or long codes.
-        4. Return **ONLY** the color name (and its number if present).
-        5. If the text is fuzzy, make your best guess based on standard textile color names.
+        3. Return **ONLY** the color name (e.g. "Sand").
         `;
 
         const response = await retryWithBackoff<GenerateContentResponse>(() => ai.models.generateContent({
@@ -169,7 +169,6 @@ export const extractColorFromSwatch = async (base64Data: string): Promise<string
         return result.colorName || null;
 
     } catch (error) {
-        // Silently fail for individual colors to keep the process moving
         return null; 
     }
 };

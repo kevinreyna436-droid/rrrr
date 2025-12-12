@@ -117,17 +117,8 @@ export default function App() {
       setPinModalOpen(true);
   };
 
-  const handleShareClick = () => {
-      const url = "https://creata-catalogo.web.app";
-      navigator.clipboard.writeText(url).then(() => {
-          alert("Link copiado al portapapeles: " + url);
-      }).catch(() => {
-          alert("Link: " + url);
-      });
-  };
-
   const handleFabricClick = (fabric: Fabric, specificColor?: string) => {
-    if (activeTab === 'model') {
+    if (activeTab === 'model' || activeTab === 'wood') {
         setSelectedFabricId(fabric.id);
         setView('detail');
     } else {
@@ -251,7 +242,9 @@ export default function App() {
   };
 
   const getSortedColorCards = () => {
-      const items = getFilteredItems();
+      // For color view, we typically only show textile fabrics, not wood
+      const items = getFilteredItems().filter(f => f.category !== 'wood');
+      
       const allColorCards = items.flatMap((fabric) => 
           (fabric.colors || []).map((colorName) => ({
               fabric,
@@ -321,16 +314,42 @@ export default function App() {
     const items = getFilteredItems();
 
     if (activeTab === 'wood') {
-        return (
-            <div className="text-center py-20 text-gray-400">
-                <h3 className="font-serif text-xl italic">Colección de maderas próximamente</h3>
-            </div>
-        );
+        const woodItems = items.filter(f => f.category === 'wood');
+        woodItems.sort((a, b) => a.name.localeCompare(b.name, 'es', { sensitivity: 'base' }));
+        
+        if (woodItems.length === 0) {
+            return (
+                <div className="col-span-full text-center py-20 text-gray-400">
+                    <h3 className="font-serif text-xl italic">No hay maderas cargadas.</h3>
+                </div>
+            );
+        }
+
+        return woodItems.map((fabric, idx) => (
+            <FabricCard 
+                key={fabric.id} 
+                fabric={fabric}
+                mode="model"
+                onClick={() => handleFabricClick(fabric)}
+                index={idx}
+            />
+        ));
     }
 
     if (activeTab === 'model') {
-        items.sort((a, b) => a.name.localeCompare(b.name, 'es', { sensitivity: 'base' }));
-        return items.map((fabric, idx) => (
+        // Filter out wood from standard model view
+        const textileItems = items.filter(f => f.category !== 'wood');
+        textileItems.sort((a, b) => a.name.localeCompare(b.name, 'es', { sensitivity: 'base' }));
+        
+        if (textileItems.length === 0) {
+            return (
+                 <div className="col-span-full text-center py-20 text-gray-400">
+                    <h3 className="font-serif text-xl italic">No hay telas cargadas.</h3>
+                </div>
+            );
+        }
+
+        return textileItems.map((fabric, idx) => (
             <FabricCard 
                 key={fabric.id} 
                 fabric={fabric}
@@ -375,34 +394,22 @@ export default function App() {
          </div>
       )}
 
-      {/* Cloud Status Indicator */}
-      <div className="fixed top-4 left-4 z-50 flex items-center space-x-2">
-         {offlineStatus ? (
+      {/* Top Right Controls (Status + Upload) */}
+      <div className="fixed top-4 right-4 z-50 flex items-center gap-4">
+          
+          {/* Status Indicator */}
+          {offlineStatus ? (
              <div className="flex items-center space-x-2 bg-red-100 text-red-600 px-3 py-1 rounded-full border border-red-200 shadow-sm animate-pulse cursor-pointer" onClick={handleRetryConnection} title="Intentar Reconectar">
                 <div className="w-2 h-2 rounded-full bg-red-500"></div>
-                <span className="text-[10px] font-bold uppercase tracking-wide">Modo Offline</span>
-                <span className="text-[9px] underline ml-1">Reconectar</span>
+                <span className="text-[10px] font-bold uppercase tracking-wide">Offline</span>
              </div>
          ) : (
             <div 
                 onClick={handleCloudRefresh}
-                className="flex items-center space-x-2 bg-white/80 backdrop-blur text-green-600 px-3 py-1 rounded-full border border-green-100 shadow-sm cursor-pointer hover:bg-green-50 transition-colors"
-                title="Click para refrescar datos desde la nube"
-            >
-                <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></div>
-                <span className="text-[10px] font-bold uppercase tracking-wide">Nube Conectada</span>
-             </div>
+                className="w-3 h-3 rounded-full bg-green-500 shadow-sm cursor-pointer hover:scale-110 transition-transform border border-white"
+                title="Conectado (Click para refrescar)"
+            ></div>
          )}
-      </div>
-
-      <div className="fixed top-4 right-4 z-50 flex items-center gap-2">
-          <button 
-            onClick={handleShareClick}
-            className="text-gray-400 hover:text-black font-bold text-sm w-8 h-8 flex items-center justify-center rounded-full hover:bg-white transition-colors"
-            title="Compartir Link de la App"
-          >
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z" /></svg>
-          </button>
 
           <button 
             onClick={handleUploadClick}
@@ -427,10 +434,10 @@ export default function App() {
                 Catálogo de telas
             </h1>
             
-            <div className="flex space-x-8 md:space-x-12 border-b border-transparent">
+            <div className="flex space-x-8 md:space-x-12 border-b border-transparent overflow-x-auto w-full justify-center hide-scrollbar">
                 <button 
                     onClick={() => { setActiveTab('model'); setFilterMenuOpen(false); setView('grid'); }}
-                    className={`pb-2 text-sm font-medium tracking-wide uppercase transition-colors ${
+                    className={`pb-2 text-sm font-medium tracking-wide uppercase transition-colors whitespace-nowrap ${
                         activeTab === 'model' && view === 'grid' ? 'text-black border-b-2 border-black' : 'text-gray-400 hover:text-gray-600'
                     }`}
                 >
@@ -438,19 +445,19 @@ export default function App() {
                 </button>
                 <button 
                     onClick={() => { setActiveTab('color'); setView('grid'); }}
-                    className={`pb-2 text-sm font-medium tracking-wide uppercase transition-colors ${
+                    className={`pb-2 text-sm font-medium tracking-wide uppercase transition-colors whitespace-nowrap ${
                         activeTab === 'color' && view === 'grid' ? 'text-black border-b-2 border-black' : 'text-gray-400 hover:text-gray-600'
                     }`}
                 >
                     Ver colores
                 </button>
                 <button 
-                    onClick={() => { setView('list'); setFilterMenuOpen(false); }}
-                    className={`pb-2 text-sm font-medium tracking-wide uppercase transition-colors ${
-                        view === 'list' ? 'text-black border-b-2 border-black' : 'text-gray-400 hover:text-gray-600'
+                    onClick={() => { setActiveTab('wood'); setView('grid'); }}
+                    className={`pb-2 text-sm font-medium tracking-wide uppercase transition-colors whitespace-nowrap ${
+                        activeTab === 'wood' && view === 'grid' ? 'text-black border-b-2 border-black' : 'text-gray-400 hover:text-gray-600'
                     }`}
                 >
-                    Historial (Lista)
+                    Maderas
                 </button>
             </div>
             
@@ -530,7 +537,7 @@ export default function App() {
                 <div className="flex justify-center items-center py-20">
                    <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-black"></div>
                 </div>
-            ) : filteredItemCount === 0 && activeTab !== 'wood' ? (
+            ) : filteredItemCount === 0 ? (
                 <div className="text-center py-20 text-gray-300">
                      <p>El catálogo está vacío.</p>
                      <div className="mt-4">
@@ -538,7 +545,7 @@ export default function App() {
                            onClick={handleUploadClick}
                            className="bg-black text-white px-6 py-3 rounded-full text-sm font-bold uppercase tracking-wide hover:scale-105 transition-transform"
                         >
-                           Empezar a Cargar Telas
+                           Empezar a Cargar
                         </button>
                      </div>
                 </div>
@@ -576,7 +583,7 @@ export default function App() {
                                          <span className="text-sm font-medium text-gray-500 uppercase tracking-wide">{f.supplier}</span>
                                      </td>
                                      <td className="p-4">
-                                         <span className="text-xs font-bold px-2 py-1 rounded bg-gray-100 text-gray-500 uppercase">{f.category === 'wood' ? 'Maderas' : f.customCatalog || 'Textil'}</span>
+                                         <span className={`text-xs font-bold px-2 py-1 rounded uppercase ${f.category === 'wood' ? 'bg-amber-100 text-amber-800' : 'bg-gray-100 text-gray-500'}`}>{f.category === 'wood' ? 'Maderas' : f.customCatalog || 'Textil'}</span>
                                      </td>
                                      <td className="p-4 pr-8 text-right">
                                          <span className="text-sm font-bold text-black">{f.colors?.length || 0}</span>

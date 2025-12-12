@@ -18,6 +18,9 @@ const EditFabricModal: React.FC<EditFabricModalProps> = ({ fabric, onClose, onSa
   });
   
   const [isSaving, setIsSaving] = useState(false);
+  // New State for Delete Confirmation
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  
   const fileInputRef = useRef<HTMLInputElement>(null);
   const specsImageInputRef = useRef<HTMLInputElement>(null);
   const specsPdfInputRef = useRef<HTMLInputElement>(null);
@@ -135,18 +138,20 @@ const EditFabricModal: React.FC<EditFabricModalProps> = ({ fabric, onClose, onSa
   const handleDeleteClick = (e: React.MouseEvent) => {
       e.stopPropagation();
       e.preventDefault();
-      if (window.confirm("¿Estás seguro de que quieres eliminar esta ficha completamente? Esta acción no se puede deshacer.")) {
-        onDelete();
+      
+      if (!showDeleteConfirm) {
+          setShowDeleteConfirm(true);
+          return;
       }
+      
+      onDelete();
   };
 
   const handleSaveClick = async () => {
     setIsSaving(true);
     try {
         await onSave(formData);
-        // onClose is called by parent if save succeeds, typically
     } catch (e) {
-        // Error is alerted in firebase.ts, we just stop the spinner here
         console.error("Save failed in modal", e);
     } finally {
         setIsSaving(false);
@@ -420,9 +425,13 @@ const EditFabricModal: React.FC<EditFabricModalProps> = ({ fabric, onClose, onSa
                 <button 
                     type="button"
                     onClick={handleDeleteClick}
-                    className="w-full text-red-400 text-xs font-bold uppercase tracking-widest hover:text-red-600 hover:underline py-2"
+                    className={`w-full text-xs font-bold uppercase tracking-widest py-3 rounded-xl transition-all duration-300 ${
+                        showDeleteConfirm 
+                            ? 'bg-red-500 text-white hover:bg-red-600 shadow-md animate-pulse' 
+                            : 'text-red-400 hover:text-red-600 hover:bg-red-50'
+                    }`}
                 >
-                    Eliminar Ficha Permanentemente
+                    {showDeleteConfirm ? '¿Estás seguro? Click para BORRAR DEFINITIVAMENTE' : 'Eliminar Ficha Permanentemente'}
                 </button>
             )}
         </div>

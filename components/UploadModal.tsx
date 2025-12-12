@@ -121,9 +121,9 @@ const UploadModal: React.FC<UploadModalProps> = ({ isOpen, onClose, onSave, onBu
       const pdfFile = groupFiles.find(f => f.type === 'application/pdf');
       const imgFiles = groupFiles.filter(f => f.type.startsWith('image/'));
 
-      let rawData: any = { name: "Unknown", supplier: "Unknown", technicalSummary: "", specs: {} };
+      let rawData: any = { name: "Unknown", supplier: "Unknown", technicalSummary: "", specs: {}, colors: [] };
 
-      // 1. Extract Info (Keep standard quality for AI to be fast)
+      // 1. Extract Info from PDF (Primary Source for Textual Data)
       try {
         if (pdfFile) {
             const base64Data = await fileToBase64(pdfFile);
@@ -133,9 +133,8 @@ const UploadModal: React.FC<UploadModalProps> = ({ isOpen, onClose, onSave, onBu
                  console.warn("PDF too large for AI analysis, skipping extraction.");
             }
             rawData.pdfUrl = base64Data;
-
         } else if (imgFiles.length > 0) {
-            // LOW RES for AI Analysis (800px)
+            // Fallback: Try to extract data from first image header if no PDF
             const aiAnalysisImg = await compressImage(imgFiles[0], 800, 0.70);
             rawData = await extractFabricData(aiAnalysisImg.split(',')[1], 'image/jpeg');
         }
@@ -152,31 +151,23 @@ const UploadModal: React.FC<UploadModalProps> = ({ isOpen, onClose, onSave, onBu
           rawData.name = cleanFabricName(rawData.name);
       }
       if (!rawData.name || rawData.name === "Unknown") {
+          // Fallback to Folder Name if AI fails
           rawData.name = cleanFabricName(groupName); 
       }
 
-      let dbColors: string[] = [];
-      const dbName = Object.keys(MASTER_FABRIC_DB).find(
-        key => key.toLowerCase() === rawData.name?.toLowerCase()
-      );
-
-      if (dbName) {
-        dbColors = [...MASTER_FABRIC_DB[dbName]];
-        rawData.name = dbName;
-      }
-
+      // STARTING LIST OF COLORS: From PDF text extraction
+      const detectedColorsList: string[] = Array.isArray(rawData.colors) ? [...rawData.colors] : [];
       const colorImages: Record<string, string> = {};
-      const detectedColorsList: string[] = [];
-      
+
       let processedCount = 0;
       for (const file of imgFiles) {
         processedCount++;
         if (processedCount % 3 === 0) {
-             setCurrentProgress(`Escaneando colores (${processedCount}/${imgFiles.length}) para ${rawData.name}...`);
+             setCurrentProgress(`Escaneando fotos (${processedCount}/${imgFiles.length}) para ${rawData.name}...`);
         }
 
         try {
-            // THROTTLE: Increase delay to 6 seconds per image to be EXTREMELY safe
+            // THROTTLE: 6s per image
             await new Promise(resolve => setTimeout(resolve, 6000));
 
             // OPTIMIZED STORAGE: 1600px, 0.75
@@ -189,32 +180,36 @@ const UploadModal: React.FC<UploadModalProps> = ({ isOpen, onClose, onSave, onBu
             let detectedName = await extractColorFromSwatch(base64ImgSmall.split(',')[1]);
             
             if (!detectedName) {
+                // Heuristic: Try to match file name to PDF color list
                 const fileNameLower = file.name.toLowerCase().replace(/\.[^/.]+$/, "");
-                if (dbColors.length > 0) {
-                     const matchedColor = dbColors.find(color => fileNameLower.includes(color.toLowerCase()));
+                if (detectedColorsList.length > 0) {
+                     const matchedColor = detectedColorsList.find(c => fileNameLower.includes(c.toLowerCase()));
                      if (matchedColor) detectedName = matchedColor;
                 }
-                if (!detectedName) {
-                    let cleanColorName = fileNameLower;
-                    if (rawData.name) {
-                        const nameRegex = new RegExp(`^${rawData.name}[_\\-\\s]*`, 'i');
-                        cleanColorName = cleanColorName.replace(nameRegex, '');
-                    }
-                    cleanColorName = cleanColorName.replace(/^(fromatex|fotmatex|formatex|creata)[_\-\s]*/i, '');
-                    const cleanName = cleanColorName.replace(/[-_]/g, " ").trim();
+            }
+
+            // Fallback: Use Filename if no match
+            if (!detectedName) {
+                let cleanColorName = file.name.toLowerCase().replace(/\.[^/.]+$/, "");
+                cleanColorName = cleanColorName.replace(/^(fromatex|fotmatex|formatex|creata)[_\-\s]*/i, '');
+                if (rawData.name) {
+                     const nameRegex = new RegExp(`^${rawData.name}[_\\-\\s]*`, 'i');
+                     cleanColorName = cleanColorName.replace(nameRegex, '');
+                }
+                const cleanName = cleanColorName.replace(/[-_]/g, " ").trim();
+                if (cleanName.length > 2) {
                     detectedName = cleanName.charAt(0).toUpperCase() + cleanName.slice(1);
                 }
             }
 
-            if (detectedName && dbColors.length > 0) {
-                 const exactMatch = dbColors.find(c => c.toLowerCase() === detectedName!.toLowerCase().trim());
-                 if (exactMatch) detectedName = exactMatch;
-            }
-
             if (detectedName) {
+                // If this color wasn't in PDF list, add it
+                if (!detectedColorsList.includes(detectedName)) {
+                    detectedColorsList.push(detectedName);
+                }
+                // Assign image
                 if (!colorImages[detectedName]) {
                     colorImages[detectedName] = base64Img;
-                    detectedColorsList.push(detectedName);
                 }
             }
         } catch (imgError) {
@@ -222,11 +217,7 @@ const UploadModal: React.FC<UploadModalProps> = ({ isOpen, onClose, onSave, onBu
         }
       }
 
-      if (dbName && dbColors.length > 0) {
-           detectedColorsList.sort(); 
-      } else {
-           detectedColorsList.sort();
-      }
+      detectedColorsList.sort();
 
       let mainImageToUse = '';
       if (Object.keys(colorImages).length > 0) {
@@ -310,6 +301,25 @@ const UploadModal: React.FC<UploadModalProps> = ({ isOpen, onClose, onSave, onBu
             const fabricNameHint = key === 'Lote Cargado' ? 'Unknown' : key;
             const fabricData = await analyzeFileGroup(groupFiles, fabricNameHint);
 
+            // STRICT VALIDATION RULES (PER USER REQUEST)
+            // 1. Must have a valid Name (Not Unknown)
+            if (!fabricData.name || fabricData.name === "Unknown") {
+                console.log(`Skipping ${key}: No valid Fabric Name found.`);
+                continue;
+            }
+
+            // 2. Must have valid Technical Specs (Composition, Martindale, or Weight)
+            const hasSpecs = fabricData.specs && (
+                (fabricData.specs.composition && fabricData.specs.composition.length > 2) ||
+                (fabricData.specs.martindale && fabricData.specs.martindale.length > 2) ||
+                (fabricData.specs.weight && fabricData.specs.weight.length > 2)
+            );
+
+            if (!hasSpecs) {
+                 console.log(`Skipping ${fabricData.name}: No valid technical specs found.`);
+                 continue;
+            }
+
             // HEURISTIC 2: Check Extracted Name against DB
             const extractedNameClean = (fabricData.name || '').toLowerCase().trim();
             if (extractedNameClean && extractedNameClean !== 'unknown' && existingNamesNormalized.includes(extractedNameClean)) {
@@ -330,7 +340,7 @@ const UploadModal: React.FC<UploadModalProps> = ({ isOpen, onClose, onSave, onBu
         setExtractedFabrics(results);
         setStep('review');
     } else {
-        alert('No se pudieron procesar los archivos. Verifica que sean válidos e inténtalo de nuevo.');
+        alert('No se encontraron fichas válidas. Recuerda: Deben tener Nombre y Especificaciones Técnicas (Composición, Peso, etc).');
         setStep('upload');
     }
   };
@@ -539,7 +549,7 @@ const UploadModal: React.FC<UploadModalProps> = ({ isOpen, onClose, onSave, onBu
                              <div className="bg-yellow-50 p-4 rounded-xl mb-4 border border-yellow-100">
                                 <h3 className="text-sm font-bold text-yellow-800 uppercase tracking-wide mb-2 flex items-center">
                                     <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>
-                                    Archivos Omitidos (Ya existen)
+                                    Omitidos (Duplicados o Sin Datos)
                                 </h3>
                                 <ul className="list-disc list-inside text-xs text-yellow-700 space-y-1">
                                     {skippedFabrics.map((name, i) => (
