@@ -52,6 +52,7 @@ const uploadImage = async (path: string, base64Data: string): Promise<string> =>
         const storageRef = ref(storage, path);
         await uploadString(storageRef, base64Data, 'data_url');
         const url = await getDownloadURL(storageRef);
+        console.log(`✅ Imagen subida a Nube: ${path}`);
         return url;
     } catch (e: any) {
         if (e.code === 'storage/unauthorized') {
@@ -68,7 +69,9 @@ const uploadImage = async (path: string, base64Data: string): Promise<string> =>
 export const getFabricsFromFirestore = async (): Promise<Fabric[]> => {
   try {
     const querySnapshot = await getDocs(collection(db, "fabrics"));
-    return querySnapshot.docs.map(doc => doc.data() as Fabric);
+    const data = querySnapshot.docs.map(doc => doc.data() as Fabric);
+    console.log(`✅ Leídas ${data.length} telas de la base de datos.`);
+    return data;
   } catch (e: any) {
     if (e.code === 'permission-denied') {
         console.error("⛔ PERMISO DENEGADO EN FIRESTORE. Revisa las reglas en Firebase Console.");
@@ -117,6 +120,7 @@ export const saveFabricToFirestore = async (fabric: Fabric): Promise<void> => {
 
     // 4. Save metadata to Firestore
     await setDoc(doc(db, "fabrics", fabric.id), updatedFabric);
+    console.log(`✅ Ficha guardada en Firestore: ${fabric.name}`);
 
   } catch (e: any) {
       if (e.code === 'permission-denied') {

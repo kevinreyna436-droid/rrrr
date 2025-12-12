@@ -82,12 +82,6 @@ export default function App() {
 
   // Run diagnostic on mount
   useEffect(() => {
-    const runDiag = async () => {
-        // Don't auto-run full diagnostic on every reload as it writes to DB, but check connection
-        if (!isOfflineMode()) {
-            // Optional: Silent check
-        }
-    };
     loadData();
     window.addEventListener('online', () => setOfflineStatus(false));
     window.addEventListener('offline', () => setOfflineStatus(true));
@@ -111,9 +105,12 @@ export default function App() {
       setLoading(false);
   };
 
-  const handleDiagnostic = async () => {
+  const handleCloudRefresh = async () => {
+      setLoading(true);
+      await loadData();
       const result = await testStorageConnection();
-      alert(`ESTADO DEL SISTEMA:\n\n${result.message}\n\nConectado: ${result.success ? 'SÍ' : 'NO'}`);
+      setLoading(false);
+      setDiagnosticResult(result);
   };
 
   const handleUploadClick = () => {
@@ -388,11 +385,11 @@ export default function App() {
              </div>
          ) : (
             <div 
-                onClick={handleDiagnostic}
+                onClick={handleCloudRefresh}
                 className="flex items-center space-x-2 bg-white/80 backdrop-blur text-green-600 px-3 py-1 rounded-full border border-green-100 shadow-sm cursor-pointer hover:bg-green-50 transition-colors"
-                title="Click para comprobar estado de Nube"
+                title="Click para refrescar datos desde la nube"
             >
-                <div className="w-2 h-2 rounded-full bg-green-500"></div>
+                <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></div>
                 <span className="text-[10px] font-bold uppercase tracking-wide">Nube Conectada</span>
              </div>
          )}
