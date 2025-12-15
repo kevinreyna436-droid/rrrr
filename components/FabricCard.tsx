@@ -11,6 +11,7 @@ interface FabricCardProps {
 }
 
 // Helper to Capitalize First Letter (Title Case)
+// Handles "ALANIS" -> "Alanis", "navy blue" -> "Navy Blue"
 const toTitleCase = (str: string) => {
   if (!str) return '';
   return str.toLowerCase().split(' ').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ');
@@ -44,7 +45,7 @@ const FabricCard: React.FC<FabricCardProps> = ({ fabric, onClick, mode, specific
           <div className="w-full h-full flex items-center justify-center bg-gray-50 group-hover:bg-gray-100 transition-colors">
             <div className="text-center">
               <span className="block font-serif text-3xl md:text-4xl text-gray-200 font-bold opacity-50 mb-2">
-                 {fabric.name.charAt(0).toUpperCase()}
+                 {fabric.name ? fabric.name.charAt(0).toUpperCase() : '?'}
               </span>
               <span className="text-[10px] uppercase tracking-widest text-gray-300">
                  Sin Foto
@@ -67,12 +68,12 @@ const FabricCard: React.FC<FabricCardProps> = ({ fabric, onClick, mode, specific
               
               {/* Subtítulo: Proveedor (Ej: FORMATEX) - Todo mayúsculas, espaciado */}
               <p className="text-[10px] font-bold text-gray-400 uppercase tracking-[0.25em] leading-relaxed">
-                {fabric.supplier || 'CREATA'}
+                {fabric.supplier ? fabric.supplier.toUpperCase() : 'CREATA'}
               </p>
               
               {/* Pie: Lista de colores disponibles (texto gris claro) */}
               <p className="text-[10px] text-gray-400 font-light mt-2 line-clamp-1 max-w-[95%] opacity-80 overflow-hidden text-ellipsis">
-                {colorList.length > 0 ? colorList.join(', ') : ''}
+                {colorList.length > 0 ? colorList.join(', ') : 'Sin variantes'}
               </p>
             </>
           ) : (
@@ -85,7 +86,7 @@ const FabricCard: React.FC<FabricCardProps> = ({ fabric, onClick, mode, specific
               
               {/* Subtítulo: Nombre Modelo (Ej: ALANIS) - Todo mayúsculas */}
               <p className="text-[10px] font-bold text-gray-400 uppercase tracking-[0.25em] leading-relaxed">
-                {fabric.name}
+                {fabric.name ? fabric.name.toUpperCase() : ''}
               </p>
             </>
           )}

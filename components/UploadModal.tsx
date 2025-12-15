@@ -13,6 +13,12 @@ interface UploadModalProps {
   existingFabrics?: Fabric[]; 
 }
 
+// Helper for formatting during extraction
+const toTitleCase = (str: string | undefined | null) => {
+  if (!str) return '';
+  return str.toLowerCase().split(' ').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ');
+};
+
 const UploadModal: React.FC<UploadModalProps> = ({ isOpen, onClose, onSave, onBulkSave, onReset, existingFabrics = [] }) => {
   const [step, setStep] = useState<'upload' | 'processing' | 'review'>('upload');
   const [files, setFiles] = useState<File[]>([]);
@@ -86,24 +92,53 @@ const UploadModal: React.FC<UploadModalProps> = ({ isOpen, onClose, onSave, onBu
       const imgFiles = groupFiles.filter(f => f.type.startsWith('image/'));
       let rawData: any = { name: "Unknown", supplier: "Unknown", technicalSummary: "", specs: {}, colors: [] };
 
-      // Minimal logic for brevity, assuming imported services handle details
       try {
         if (pdfFile) {
+             // Procesar PDF con IA (Restaurado)
              const reader = new FileReader();
              await new Promise((resolve) => {
-                 reader.onload = (e) => { rawData.pdfUrl = e.target?.result; resolve(true); };
+                 reader.onload = async (e) => { 
+                     rawData.pdfUrl = e.target?.result;
+                     try {
+                        // Intentar extraer datos del PDF si es posible enviarlo
+                        const b64 = (e.target?.result as string).split(',')[1];
+                        const aiExtracted = await extractFabricData(b64, 'application/pdf');
+                        // Merge safely
+                        if (aiExtracted && aiExtracted.name !== 'Unknown') {
+                            rawData = { ...rawData, ...aiExtracted };
+                        }
+                     } catch (err) {
+                        console.warn("PDF AI Extraction failed, using fallback");
+                     }
+                     resolve(true); 
+                 };
                  reader.readAsDataURL(pdfFile);
              });
-             // Skip heavy AI for PDF in this critical fix version to speed up flow
-             rawData.name = groupName;
-        } else if (imgFiles.length > 0) {
+        } 
+        
+        // Si no se extrajo nombre del PDF, o hay imagenes para analizar
+        if ((!rawData.name || rawData.name === "Unknown") && imgFiles.length > 0) {
             const aiImg = await compressImage(imgFiles[0], 800, 0.6);
-            rawData = await extractFabricData(aiImg.split(',')[1], 'image/jpeg');
+            const aiData = await extractFabricData(aiImg.split(',')[1], 'image/jpeg');
+            // Mezclar datos, priorizando lo que ya tenemos si es bueno
+            if (aiData) {
+                rawData.name = rawData.name !== "Unknown" ? rawData.name : aiData.name;
+                rawData.supplier = rawData.supplier !== "Unknown" ? rawData.supplier : aiData.supplier;
+                rawData.technicalSummary = aiData.technicalSummary || rawData.technicalSummary;
+                rawData.specs = { ...rawData.specs, ...aiData.specs };
+            }
         }
       } catch (e) {}
 
-      const cleanName = (rawData.name || groupName).replace(/^(fromatex|creata)/i, '').trim();
-      rawData.name = cleanName.length > 0 ? cleanName : "Sin Nombre";
+      // Fallback name cleaning if IA completely failed or no API Key
+      if (!rawData.name || rawData.name === "Unknown") {
+         const cleanName = groupName.replace(/^(fromatex|creata)/i, '').trim();
+         rawData.name = cleanName.length > 0 ? cleanName : "Sin Nombre";
+      }
+
+      // ENFORCE STYLE GUIDE FORMATTING IMMEDIATELY
+      rawData.name = toTitleCase(rawData.name);
+      rawData.supplier = rawData.supplier ? rawData.supplier.toUpperCase() : '';
 
       const colorImages: Record<string, string> = {};
       const colors = rawData.colors || [];
@@ -113,10 +148,9 @@ const UploadModal: React.FC<UploadModalProps> = ({ isOpen, onClose, onSave, onBu
           processed++;
           if (processed % 2 === 0) setCurrentProgress(`Procesando imágenes (${processed}/${imgFiles.length})...`);
           try {
-              // Heavier compression for initial load to prevent crashes
               const b64 = await compressImage(file, 1000, 0.7);
-              // Simple heuristic mapping
-              const fName = file.name.split('.')[0];
+              // Simple heuristic: Filename as color name, title cased
+              const fName = toTitleCase(file.name.split('.')[0]);
               if (!colors.includes(fName)) colors.push(fName);
               colorImages[fName] = b64;
           } catch(e) {}
@@ -148,7 +182,7 @@ const UploadModal: React.FC<UploadModalProps> = ({ isOpen, onClose, onSave, onBu
 
     for (let i = 0; i < keys.length; i++) {
         setCurrentProgress(`Analizando grupo ${i+1} de ${keys.length}...`);
-        await new Promise(r => setTimeout(r, 1000)); // Small breathing room
+        await new Promise(r => setTimeout(r, 1000)); 
         try {
             const data = await analyzeFileGroup(groups[keys[i]], keys[i]);
             results.push(data);
@@ -159,7 +193,7 @@ const UploadModal: React.FC<UploadModalProps> = ({ isOpen, onClose, onSave, onBu
         setExtractedFabrics(results);
         setStep('review');
     } else {
-        alert("No se pudo extraer información.");
+        alert("No se pudo extraer información. Por favor revisa los archivos.");
         setStep('upload');
     }
   };
@@ -171,8 +205,8 @@ const UploadModal: React.FC<UploadModalProps> = ({ isOpen, onClose, onSave, onBu
     try {
         const finalFabrics: Fabric[] = extractedFabrics.map(data => ({
             id: Date.now().toString() + Math.random().toString(36).substr(2, 5),
-            name: data.name || 'Sin Nombre',
-            supplier: data.supplier || 'General',
+            name: toTitleCase(data.name || 'Sin Nombre'), // Ensure Title Case
+            supplier: (data.supplier || 'General').toUpperCase(), // Ensure Uppercase
             technicalSummary: data.technicalSummary || '',
             specs: data.specs || { composition: '', martindale: '', usage: '' },
             colors: data.colors || [],
@@ -198,7 +232,7 @@ const UploadModal: React.FC<UploadModalProps> = ({ isOpen, onClose, onSave, onBu
         }, 500);
 
     } catch (e) {
-        alert("Hubo un error guardando. Intenta subir menos fotos a la vez.");
+        alert("Hubo un error guardando. Intenta subir menos fotos a la vez o verifica tu internet.");
     } finally {
         setIsSaving(false);
     }
@@ -244,7 +278,7 @@ const UploadModal: React.FC<UploadModalProps> = ({ isOpen, onClose, onSave, onBu
         {step === 'processing' && (
             <div className="flex flex-col items-center justify-center h-64">
                 <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-black mb-4"></div>
-                <p className="animate-pulse">Analizando...</p>
+                <p className="animate-pulse">Analizando con IA...</p>
                 <p className="text-xs text-gray-400 mt-2">{currentProgress}</p>
             </div>
         )}
@@ -267,8 +301,19 @@ const UploadModal: React.FC<UploadModalProps> = ({ isOpen, onClose, onSave, onBu
                                  {f.mainImage && <img src={f.mainImage} className="w-full h-full object-cover rounded-lg" />}
                              </div>
                              <div className="flex-1">
-                                 <input value={f.name} onChange={e => { const up = [...extractedFabrics]; up[i].name = e.target.value; setExtractedFabrics(up); }} className="font-bold text-lg bg-transparent w-full border-b border-gray-200 focus:border-black outline-none" placeholder="Nombre" />
-                                 <input value={f.supplier} onChange={e => { const up = [...extractedFabrics]; up[i].supplier = e.target.value; setExtractedFabrics(up); }} className="text-xs uppercase tracking-widest text-gray-500 bg-transparent w-full mt-1" placeholder="Proveedor" />
+                                 {/* SAFEGUARD: Use || '' to prevent uncontrolled input warning and crashes */}
+                                 <input 
+                                    value={f.name || ''} 
+                                    onChange={e => { const up = [...extractedFabrics]; up[i].name = e.target.value; setExtractedFabrics(up); }} 
+                                    className="font-serif font-bold text-lg bg-transparent w-full border-b border-gray-200 focus:border-black outline-none" 
+                                    placeholder="Nombre Modelo (Ej: Alanis)" 
+                                 />
+                                 <input 
+                                    value={f.supplier || ''} 
+                                    onChange={e => { const up = [...extractedFabrics]; up[i].supplier = e.target.value.toUpperCase(); setExtractedFabrics(up); }} 
+                                    className="text-xs uppercase tracking-widest text-gray-500 bg-transparent w-full mt-1" 
+                                    placeholder="PROVEEDOR (Ej: FORMATEX)" 
+                                 />
                                  <div className="flex flex-wrap gap-1 mt-2">
                                      {f.colors?.map((c, ci) => (
                                          <span key={ci} className="text-[10px] bg-white border border-gray-200 px-2 py-1 rounded-full">{c}</span>

@@ -3,6 +3,7 @@ import { GoogleGenAI, Type, GenerateContentResponse } from "@google/genai";
 
 // SAFE INITIALIZATION WRAPPER
 let ai: GoogleGenAI | null = null;
+let hasValidKey = false;
 
 try {
     // Attempt to get key from various sources safely
@@ -13,25 +14,22 @@ try {
         apiKey = process.env.API_KEY || '';
     }
     
-    // If empty, try checking if Vite injected it differently or use dummy
-    if (!apiKey) {
-        console.warn("API Key not found in process.env");
-        apiKey = 'dummy-key'; 
+    if (apiKey && apiKey !== 'dummy-key') {
+        ai = new GoogleGenAI({ apiKey });
+        hasValidKey = true;
+    } else {
+        console.warn("No valid API Key found. AI features will be simulated.");
     }
-
-    ai = new GoogleGenAI({ apiKey });
 } catch (e) {
     console.error("Critical Error initializing Gemini SDK:", e);
-    // We do NOT re-throw here to avoid crashing the whole app import chain
-    // ai remains null, and we handle that in the functions below
 }
 
 /**
  * Helper function to retry operations with exponential backoff.
  */
 async function retryWithBackoff<T>(operation: () => Promise<T>, retries = 2, delay = 2000): Promise<T> {
-  if (!ai) {
-      throw new Error("AI Service not initialized");
+  if (!ai || !hasValidKey) {
+      throw new Error("AI Service not initialized or Invalid Key");
   }
 
   try {
@@ -44,6 +42,7 @@ async function retryWithBackoff<T>(operation: () => Promise<T>, retries = 2, del
     // Check if key is invalid/dummy
     if (errorMessage.includes('api key') || errorCode === 400 || errorCode === 403) {
         console.error("Invalid API Key. AI features disabled.");
+        hasValidKey = false;
         throw error; // Don't retry auth errors
     }
 
@@ -71,7 +70,10 @@ async function retryWithBackoff<T>(operation: () => Promise<T>, retries = 2, del
 }
 
 export const extractFabricData = async (base64Data: string, mimeType: string) => {
-  if (!ai) return { name: "Unknown", supplier: "Unknown", technicalSummary: "", colors: [], specs: {} };
+  // FALLBACK: If AI is missing, return a clean empty object so the user can fill it manually
+  if (!ai || !hasValidKey) {
+      return { name: "Unknown", supplier: "Unknown", technicalSummary: "", colors: [], specs: {} };
+  }
 
   try {
     const prompt = `
@@ -114,7 +116,7 @@ export const extractFabricData = async (base64Data: string, mimeType: string) =>
 
     return JSON.parse(response.text || '{}');
   } catch (error: any) {
-    console.warn("AI Extraction failed:", error?.message);
+    console.warn("AI Extraction failed, falling back to manual entry:", error?.message);
     return {
         name: "Unknown", 
         supplier: "Unknown",
@@ -126,7 +128,7 @@ export const extractFabricData = async (base64Data: string, mimeType: string) =>
 };
 
 export const extractColorFromSwatch = async (base64Data: string): Promise<string | null> => {
-    if (!ai) return null;
+    if (!ai || !hasValidKey) return null;
     try {
         const response = await retryWithBackoff<GenerateContentResponse>(() => ai!.models.generateContent({
             model: 'gemini-2.5-flash',
@@ -152,7 +154,7 @@ export const extractColorFromSwatch = async (base64Data: string): Promise<string
 };
 
 export const generateFabricDesign = async (prompt: string, aspectRatio: string = "1:1", size: string = "1K") => {
-  if (!ai) throw new Error("AI not initialized");
+  if (!ai || !hasValidKey) throw new Error("AI not initialized");
   try {
     const response = await retryWithBackoff<GenerateContentResponse>(() => ai!.models.generateContent({
       model: 'gemini-3-pro-image-preview',
@@ -178,7 +180,7 @@ export const generateFabricDesign = async (prompt: string, aspectRatio: string =
 };
 
 export const editFabricImage = async (base64Image: string, prompt: string) => {
-  if (!ai) throw new Error("AI not initialized");
+  if (!ai || !hasValidKey) throw new Error("AI not initialized");
   try {
     const response = await retryWithBackoff<GenerateContentResponse>(() => ai!.models.generateContent({
       model: 'gemini-2.5-flash-image',
@@ -200,7 +202,7 @@ export const editFabricImage = async (base64Image: string, prompt: string) => {
 };
 
 export const chatWithExpert = async (message: string, history: any[]) => {
-  if (!ai) return { text: "El sistema de IA no está disponible.", sources: [] };
+  if (!ai || !hasValidKey) return { text: "El sistema de IA no está disponible en este momento. Por favor verifica la configuración.", sources: [] };
   try {
     const response = await retryWithBackoff<GenerateContentResponse>(() => ai!.models.generateContent({
       model: 'gemini-3-pro-preview',

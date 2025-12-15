@@ -1,8 +1,7 @@
 
 import { initializeApp } from "firebase/app";
 import { 
-  getFirestore, collection, getDocs, doc, setDoc, deleteDoc, writeBatch, 
-  enableIndexedDbPersistence 
+  getFirestore, collection, getDocs, doc, setDoc, deleteDoc, writeBatch
 } from "firebase/firestore";
 import { getStorage, ref, uploadString, getDownloadURL } from "firebase/storage";
 import { Fabric } from "../types";
@@ -21,9 +20,6 @@ const firebaseConfig = {
 const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
 const storage = getStorage(app);
-
-// Habilitar persistencia offline
-try { enableIndexedDbPersistence(db).catch(() => {}); } catch (e) {}
 
 // --- Helper Functions ---
 
@@ -63,6 +59,7 @@ const uploadImageToStorage = async (path: string, base64Data: string): Promise<s
         return url;
     } catch (e: any) {
         console.error(`❌ Error subiendo imagen a ${path}:`, e);
+        // Si falla la subida (offline), devolvemos string vacío para no bloquear el guardado
         return ''; 
     }
 };
@@ -75,13 +72,22 @@ export const saveFabricToFirestore = async (fabric: Fabric): Promise<void> => {
       // 1. Subir Imagen Principal
       if (finalFabric.mainImage && !finalFabric.mainImage.startsWith('http')) {
           const url = await uploadImageToStorage(`fabrics/${fabric.id}/main.jpg`, finalFabric.mainImage);
-          finalFabric.mainImage = url;
+          if (url) {
+              finalFabric.mainImage = url;
+          } else {
+              // Si falla la subida, EVITAR guardar el base64 gigante si excede 100KB para no colapsar Firestore
+              if (finalFabric.mainImage.length > 100000) finalFabric.mainImage = ''; 
+          }
       }
 
       // 2. Subir Imagen Ficha Técnica
       if (finalFabric.specsImage && !finalFabric.specsImage.startsWith('http')) {
           const url = await uploadImageToStorage(`fabrics/${fabric.id}/specs.jpg`, finalFabric.specsImage);
-          finalFabric.specsImage = url;
+          if (url) {
+              finalFabric.specsImage = url;
+          } else {
+              if (finalFabric.specsImage.length > 100000) finalFabric.specsImage = '';
+          }
       }
 
       // 3. Subir Imágenes de Colores
@@ -91,7 +97,10 @@ export const saveFabricToFirestore = async (fabric: Fabric): Promise<void> => {
           for (const [color, base64] of entries) {
              const safeColorName = color.replace(/[^a-z0-9]/gi, '_').toLowerCase();
              const url = await uploadImageToStorage(`fabrics/${fabric.id}/colors/${safeColorName}.jpg`, base64);
-             if (url) newColorImages[color] = url;
+             if (url) {
+                 newColorImages[color] = url;
+             } 
+             // Si falla, ignoramos la imagen pero guardamos el color en la lista
           }
           finalFabric.colorImages = newColorImages;
       }
@@ -100,10 +109,14 @@ export const saveFabricToFirestore = async (fabric: Fabric): Promise<void> => {
       const rawData = JSON.parse(JSON.stringify(finalFabric));
       const cleanData = cleanDataForFirestore(rawData);
 
-      // Asegurar campos obligatorios
+      // Asegurar campos obligatorios y valores por defecto
       if (!cleanData.colors) cleanData.colors = [];
       if (!cleanData.colorImages) cleanData.colorImages = {};
       if (!cleanData.specs) cleanData.specs = { composition: '', martindale: '', usage: '', weight: '' };
+      
+      // Asegurar strings vacíos en lugar de undefined en campos críticos
+      cleanData.name = cleanData.name || 'Sin Nombre';
+      cleanData.supplier = cleanData.supplier || '';
 
       await setDoc(doc(db, "fabrics", fabric.id), cleanData);
       console.log("✅ Guardado Exitoso en Nube");
