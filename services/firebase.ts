@@ -5,6 +5,7 @@ import {
 } from "firebase/firestore";
 import { getStorage, ref, uploadString, getDownloadURL } from "firebase/storage";
 import { Fabric } from "../types";
+import { compressBase64 } from "../utils/imageCompression";
 
 // --- CONFIGURACIÓN DE FIREBASE ---
 const firebaseConfig = {
@@ -58,9 +59,8 @@ const uploadImageToStorage = async (path: string, base64Data: string): Promise<s
         const url = await getDownloadURL(storageRef);
         return url;
     } catch (e: any) {
-        console.error(`❌ Error subiendo imagen a ${path}:`, e);
-        // Si falla la subida (offline), devolvemos string vacío para no bloquear el guardado
-        return ''; 
+        console.warn(`⚠️ Aviso: No se pudo subir imagen a Storage (${path}). Usando modo offline.`);
+        return ''; // Return empty to trigger fallback logic
     }
 };
 
@@ -75,8 +75,20 @@ export const saveFabricToFirestore = async (fabric: Fabric): Promise<void> => {
           if (url) {
               finalFabric.mainImage = url;
           } else {
-              // Si falla la subida, EVITAR guardar el base64 gigante si excede 100KB para no colapsar Firestore
-              if (finalFabric.mainImage.length > 100000) finalFabric.mainImage = ''; 
+              // FALLBACK AGRESIVO: Si falla Storage, intentar comprimir para guardar en Firestore
+              // Aceptamos intentar comprimir imágenes de hasta 5MB.
+              if (finalFabric.mainImage.length < 5000000) {
+                  console.log("Intentando comprimir y guardar imagen localmente en BD...");
+                  const compressed = await compressBase64(finalFabric.mainImage, 600, 0.5); 
+                  // Verificamos que el resultado sea seguro para Firestore (< 900KB aprox)
+                  if (compressed.length < 950000) {
+                      finalFabric.mainImage = compressed;
+                  } else {
+                      finalFabric.mainImage = ''; // Imposible guardar, muy grande
+                  }
+              } else {
+                  finalFabric.mainImage = ''; 
+              }
           }
       }
 
@@ -86,7 +98,7 @@ export const saveFabricToFirestore = async (fabric: Fabric): Promise<void> => {
           if (url) {
               finalFabric.specsImage = url;
           } else {
-              if (finalFabric.specsImage.length > 100000) finalFabric.specsImage = '';
+              finalFabric.specsImage = '';
           }
       }
 
@@ -94,13 +106,27 @@ export const saveFabricToFirestore = async (fabric: Fabric): Promise<void> => {
       if (finalFabric.colorImages) {
           const newColorImages: Record<string, string> = {};
           const entries = Object.entries(finalFabric.colorImages);
+          
           for (const [color, base64] of entries) {
+             if (base64.startsWith('http')) {
+                 newColorImages[color] = base64;
+                 continue;
+             }
+
              const safeColorName = color.replace(/[^a-z0-9]/gi, '_').toLowerCase();
              const url = await uploadImageToStorage(`fabrics/${fabric.id}/colors/${safeColorName}.jpg`, base64);
+             
              if (url) {
                  newColorImages[color] = url;
-             } 
-             // Si falla, ignoramos la imagen pero guardamos el color en la lista
+             } else {
+                 // Fallback para colores
+                 if (base64.length < 3000000) {
+                     const compressed = await compressBase64(base64, 300, 0.5);
+                     if (compressed.length < 500000) { // Límite más estricto para colores para no llenar el doc
+                         newColorImages[color] = compressed;
+                     }
+                 }
+             }
           }
           finalFabric.colorImages = newColorImages;
       }
