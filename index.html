@@ -55,11 +55,26 @@
         scrollbar-width: none;
       }
     </style>
-    <!-- CRITICAL POLYFILL: Defines process.env globally before any module loads -->
+    <!-- CRITICAL POLYFILL & ERROR TRAP -->
     <script>
       window.process = {
         env: {
           NODE_ENV: 'development'
+        }
+      };
+      
+      // Capturador de errores global inmediato
+      window.onerror = function(message, source, lineno, colno, error) {
+        console.error("Critical Error:", message);
+        const root = document.getElementById('root');
+        if (root) {
+            root.innerHTML = `
+                <div style="height:100vh; display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center; padding:20px; font-family:sans-serif;">
+                    <h1 style="color:#e11d48; font-size:24px; margin-bottom:10px;">Error de Carga</h1>
+                    <p style="color:#374151; background:#f3f4f6; padding:15px; border-radius:10px; font-family:monospace; max-width:100%; overflow:auto;">${message}</p>
+                    <button onclick="window.location.reload()" style="margin-top:20px; background:black; color:white; padding:10px 20px; border-radius:20px; border:none; cursor:pointer;">Reintentar</button>
+                </div>
+            `;
         }
       };
     </script>
@@ -76,7 +91,7 @@
     "firebase/storage": "https://esm.sh/firebase@10.8.0/storage",
     "@vitejs/plugin-react": "https://esm.sh/@vitejs/plugin-react@4.2.1",
     "vite": "https://esm.sh/vite@5.1.4",
-    "firebase/": "https://esm.sh/firebase@^12.6.0/"
+    "firebase/": "https://esm.sh/firebase@^12.7.0/"
   }
 }
 </script>
@@ -84,5 +99,23 @@
   <body>
     <div id="root"></div>
     <script type="module" src="/index.tsx"></script>
+    
+    <!-- RESCUE SCRIPT: Checks if React mounted after 3 seconds -->
+    <script>
+        setTimeout(function() {
+            const root = document.getElementById('root');
+            if (root && !root.hasChildNodes()) {
+                console.error("Timeout: React did not mount.");
+                root.innerHTML = `
+                    <div style="height:100vh; display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center; font-family:sans-serif; color:#4b5563;">
+                        <div style="border: 4px solid #f3f3f3; border-top: 4px solid #000; border-radius: 50%; width: 40px; height: 40px; animation: spin 1s linear infinite; margin-bottom: 20px;"></div>
+                        <h2 style="font-size:18px; font-weight:600; color:black;">Iniciando Aplicación...</h2>
+                        <p style="font-size:14px; margin-top:5px;">Si esto tarda mucho, verifica tu conexión.</p>
+                        <style>@keyframes spin {0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); }}</style>
+                    </div>
+                `;
+            }
+        }, 3000);
+    </script>
   </body>
 </html>

@@ -30,7 +30,7 @@ const FabricCard: React.FC<FabricCardProps> = ({ fabric, onClick, mode, specific
   return (
     <div 
       onClick={onClick}
-      className="group relative w-full aspect-[3/4] md:aspect-[4/5] bg-white rounded-3xl shadow-sm hover:shadow-2xl transition-all duration-500 overflow-hidden cursor-pointer flex flex-col hover:-translate-y-2 hover:scale-[0.97] transform-gpu scale-[0.95]"
+      className="group relative w-full aspect-[3/4] md:aspect-[4/5] bg-white rounded-[2.5rem] shadow-sm hover:shadow-2xl transition-all duration-500 overflow-hidden cursor-pointer flex flex-col hover:-translate-y-2 hover:scale-[0.97] transform-gpu scale-[0.95]"
     >
       {/* SECTION SUPERIOR (Imagen) - 75% height for more visual impact */}
       <div className="relative h-[75%] w-full bg-gray-100 overflow-hidden">
@@ -60,6 +60,7 @@ const FabricCard: React.FC<FabricCardProps> = ({ fabric, onClick, mode, specific
         <div className="w-full flex flex-col items-center justify-center space-y-1">
           {mode === 'model' ? (
             /* --- VISTA MODELOS (Grid General) --- */
+            /* Título: Nombre Modelo | Subtítulo: Proveedor */
             <>
               {/* Título: Nombre Modelo (Ej: Alanis) - Primera mayúscula */}
               <h3 className="font-serif text-2xl font-medium text-slate-900 leading-tight group-hover:text-black transition-colors">
@@ -78,6 +79,7 @@ const FabricCard: React.FC<FabricCardProps> = ({ fabric, onClick, mode, specific
             </>
           ) : (
             /* --- VISTA COLORES (Grid Colores) --- */
+            /* Título: Nombre Color | Subtítulo: Colección Madre */
             <>
               {/* Título: Nombre Color (Ej: 05 Sand) - Primera mayúscula */}
               <h3 className="font-serif text-xl font-medium text-slate-900 leading-tight group-hover:text-black transition-colors line-clamp-1">
